@@ -178,7 +178,7 @@ class MainWindow(QMainWindow):
         self.pages = QStackedWidget()
         for index, (text, page) in enumerate(
             (("Bibliothèque", self._build_library_page()),
-             ("Classeur Excel", self._build_workbook_page()),
+            ("Classeur Excel", self._build_workbook_page()),
              ("Parcours Git", self._build_roadmap_page()))
         ):
             button = QPushButton(text)
