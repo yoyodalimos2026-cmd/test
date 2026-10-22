@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
+import tokenize
 from pathlib import Path
 
 from PySide6.QtCore import (
-    QAbstractTableModel,
-    QModelIndex,
     QProcess,
     QRunnable,
     QThreadPool,
@@ -15,12 +15,12 @@ from PySide6.QtCore import (
     Signal,
     QObject,
 )
-from PySide6.QtGui import QColor, QFont, QPalette
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
-    QFileDialog,
+    QDialogButtonBox,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -29,103 +29,101 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMessageBox,
-    QProgressBar,
+    QPlainTextEdit,
     QPushButton,
     QSplitter,
     QStackedWidget,
-    QTabWidget,
-    QTableView,
     QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
 
 from app.catalog import CatalogItem, related_items, scan_catalog
-from app.workbook import SheetPreview, WorkbookPreview, inspect_workbook, run_vba_macro
 
 
 ROOT = Path(__file__).resolve().parents[1]
 DESCRIPTIONS_FILE = ROOT / "module_descriptions.json"
 
 
-class TaskSignals(QObject):
-    finished = Signal(str)
+class GitTaskSignals(QObject):
+    finished = Signal()
     failed = Signal(str)
-    progress = Signal(str)
 
 
-class WorkbookLoadSignals(QObject):
-    loaded = Signal(object)
-    failed = Signal(str)
-    progress = Signal(str)
-
-
-class WorkbookLoadTask(QRunnable):
-    def __init__(self, path: Path):
-        super().__init__()
-        self.path = path
-        self.signals = WorkbookLoadSignals()
-
-    def run(self) -> None:
-        try:
-            preview = inspect_workbook(self.path, progress_callback=self.signals.progress.emit)
-            self.signals.loaded.emit(preview)
-        except Exception as error:
-            self.signals.failed.emit(str(error))
-
-
-class PreviewTableModel(QAbstractTableModel):
-    def __init__(self, sheet: SheetPreview):
-        super().__init__()
-        self.sheet = sheet
-        self.column_count = max((len(row) for row in sheet.rows), default=0)
-
-    def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
-        return 0 if parent.isValid() else len(self.sheet.rows)
-
-    def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
-        return 0 if parent.isValid() else self.column_count
-
-    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> str | None:
-        if not index.isValid() or role != Qt.ItemDataRole.DisplayRole:
-            return None
-        row = self.sheet.rows[index.row()]
-        return row[index.column()] if index.column() < len(row) else ""
-
-    def headerData(
+class GitPushTask(QRunnable):
+    def __init__(
         self,
-        section: int,
-        orientation: Qt.Orientation,
-        role: int = Qt.ItemDataRole.DisplayRole,
-    ) -> str | None:
-        if role != Qt.ItemDataRole.DisplayRole:
-            return None
-        if orientation == Qt.Orientation.Horizontal:
-            return f"Colonne {section + 1}"
-        return str(section + 1)
-
-
-class MacroTask(QRunnable):
-    def __init__(self, workbook: Path, module_path: Path, procedure: str, output_path: Path):
+        remote: str,
+        target_branch: str,
+        message: str,
+        paths: list[str],
+        repo_path: Path = ROOT,
+    ):
         super().__init__()
-        self.workbook = workbook
-        self.module_path = module_path
-        self.procedure = procedure
-        self.output_path = output_path
-        self.signals = TaskSignals()
+        self.remote = remote
+        self.target_branch = target_branch
+        self.message = message
+        self.paths = paths
+        self.repo_path = repo_path
+        self.signals = GitTaskSignals()
 
     def run(self) -> None:
         try:
-            output = run_vba_macro(
-                self.workbook,
-                self.module_path,
-                self.procedure,
-                self.output_path,
-                progress_callback=self.signals.progress.emit,
-            )
-            self.signals.finished.emit(str(output))
+            if self._git("diff", "--cached", "--name-only", cwd=self.repo_path) != "":
+                raise RuntimeError(
+                    "Des changements sont déjà indexés dans Git. "
+                    "Validez-les ou désindexez-les avant d’utiliser le bouton de publication."
+                )
+            if self._git("remote", "get-url", "origin", check=False, cwd=self.repo_path) == "":
+                self._git("remote", "add", "origin", self.remote, cwd=self.repo_path)
+            else:
+                self._git("remote", "set-url", "origin", self.remote, cwd=self.repo_path)
+
+            if self.target_branch == "main":
+                self._git("switch", "main", cwd=self.repo_path)
+            elif self._git(
+                "show-ref", "--verify", f"refs/heads/{self.target_branch}", check=False, cwd=self.repo_path
+            ):
+                self._git("switch", self.target_branch, cwd=self.repo_path)
+            else:
+                self._git("switch", "-c", self.target_branch, cwd=self.repo_path)
+
+            self._git("add", "--", *self.paths, cwd=self.repo_path)
+            if self._git("diff", "--cached", "--name-only", cwd=self.repo_path):
+                try:
+                    self._git("commit", "-m", self.message, cwd=self.repo_path)
+                except RuntimeError as error:
+                    try:
+                        self._git("reset", "--", *self.paths, cwd=self.repo_path)
+                    except RuntimeError as reset_error:
+                        raise RuntimeError(
+                            f"{error}\nLes changements n’ont pas pu être désindexés : {reset_error}"
+                        ) from error
+                    raise
+            self._git("push", "-u", "origin", self.target_branch, cwd=self.repo_path)
+            self.signals.finished.emit()
         except Exception as error:
             self.signals.failed.emit(str(error))
+
+    @staticmethod
+    def _git(*args: str, cwd: Path = ROOT, check: bool = True) -> str:
+        try:
+            result = subprocess.run(
+                ["git", *args],
+                cwd=cwd,
+                check=False,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            )
+        except OSError as error:
+            raise RuntimeError(f"Impossible de lancer Git : {error}") from error
+        if check and result.returncode != 0:
+            message = result.stderr.strip() or result.stdout.strip()
+            raise RuntimeError(message or f"Git a échoué (code {result.returncode}).")
+        return result.stdout
 
 
 def _label(text: str, style: str = "") -> QLabel:
@@ -143,10 +141,8 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(1120, 700)
         self.items: list[CatalogItem] = []
         self.current_item: CatalogItem | None = None
-        self.workbook_preview: WorkbookPreview | None = None
-        self.workbook_task: WorkbookLoadTask | None = None
         self.python_process: QProcess | None = None
-        self.macro_task: MacroTask | None = None
+        self.git_task: GitPushTask | None = None
         self.descriptions = self._read_descriptions()
         self.pool = QThreadPool.globalInstance()
         self._build_ui()
@@ -158,6 +154,10 @@ class MainWindow(QMainWindow):
             return value if isinstance(value, dict) else {}
         except (OSError, json.JSONDecodeError):
             return {}
+
+    @staticmethod
+    def _git(*args: str, check: bool = True) -> str:
+        return GitPushTask._git(*args, check=check)
 
     def _build_ui(self) -> None:
         container = QWidget()
@@ -178,7 +178,7 @@ class MainWindow(QMainWindow):
         self.pages = QStackedWidget()
         for index, (text, page) in enumerate(
             (("Bibliothèque", self._build_library_page()),
-            ("Classeur Excel", self._build_workbook_page()),
+             ("Gestion Git", self._build_git_page()),
              ("Parcours Git", self._build_roadmap_page()))
         ):
             button = QPushButton(text)
@@ -223,7 +223,7 @@ class MainWindow(QMainWindow):
         header = QHBoxLayout()
         titles = QVBoxLayout()
         titles.addWidget(_label("Bibliothèque", "page_title"))
-        titles.addWidget(_label("Explorez les macros et scripts disponibles dans vos dossiers.", "muted"))
+        titles.addWidget(_label("Explorez les modules VBA et scripts disponibles dans vos dossiers.", "muted"))
         header.addLayout(titles)
         header.addStretch(1)
         self.catalog_count = _label("", "count_badge")
@@ -295,59 +295,176 @@ class MainWindow(QMainWindow):
         layout.addWidget(splitter, 1)
         return page
 
-    def _build_workbook_page(self) -> QWidget:
+    def _build_git_page(self) -> QWidget:
         page, layout = self._page()
-        layout.addWidget(_label("Classeur Excel", "page_title"))
-        layout.addWidget(_label("Aperçu en lecture seule. Une macro crée un classeur complet à l’emplacement choisi.", "muted"))
-        path_row = QHBoxLayout()
-        self.workbook_path = QLineEdit()
-        self.workbook_path.setReadOnly(True)
-        self.workbook_path.setPlaceholderText("Sélectionnez un classeur .xlsx ou .xlsm")
-        path_row.addWidget(self.workbook_path, 1)
-        self.browse_workbook_button = QPushButton("Parcourir…")
-        self.browse_workbook_button.clicked.connect(self._browse_workbook)
-        path_row.addWidget(self.browse_workbook_button)
-        layout.addLayout(path_row)
+        layout.addWidget(_label("Gestion Git", "page_title"))
+        layout.addWidget(
+            _label(
+                "Modifiez les sources depuis la bibliothèque, puis sélectionnez les fichiers à publier.",
+                "muted",
+            )
+        )
 
-        self.workbook_status = _label("Aucun classeur chargé", "status_line")
-        layout.addWidget(self.workbook_status)
-        self.workbook_progress = QProgressBar()
-        self.workbook_progress.setRange(0, 0)
-        self.workbook_progress.setTextVisible(False)
-        self.workbook_progress.hide()
-        layout.addWidget(self.workbook_progress)
-        self.sheet_tabs = QTabWidget()
-        self.sheet_tabs.setDocumentMode(True)
-        self.sheet_tabs.setObjectName("sheet_tabs")
-        layout.addWidget(self.sheet_tabs, 1)
+        remote_row = QHBoxLayout()
+        remote_row.addWidget(_label("DÉPÔT DISTANT", "section_label"))
+        self.git_remote = QLineEdit()
+        self.git_remote.setPlaceholderText("URL HTTPS ou SSH du dépôt")
+        try:
+            remote_url = self._git("remote", "get-url", "origin", check=False).strip()
+        except RuntimeError:
+            remote_url = ""
+        self.git_remote.setText(remote_url)
+        remote_row.addWidget(self.git_remote, 1)
+        self.refresh_git_button = QPushButton("Actualiser")
+        self.refresh_git_button.clicked.connect(self._refresh_git_status)
+        remote_row.addWidget(self.refresh_git_button)
+        layout.addLayout(remote_row)
 
-        run_row = QHBoxLayout()
-        run_row.addWidget(_label("MODULE À APPLIQUER", "section_label"))
-        self.macro_selector = QComboBox()
-        self.macro_selector.currentIndexChanged.connect(self._select_macro_from_workbook)
-        run_row.addWidget(self.macro_selector, 1)
-        self.macro_procedure = QComboBox()
-        self.macro_procedure.setMinimumWidth(240)
-        run_row.addWidget(self.macro_procedure)
-        self.run_macro_button = QPushButton("Appliquer à une copie")
-        self.run_macro_button.setObjectName("primary_button")
-        self.run_macro_button.clicked.connect(self._run_macro)
-        run_row.addWidget(self.run_macro_button)
-        layout.addLayout(run_row)
-        self.macro_notice = _label(
-            "Excel VBA est pris en charge uniquement sous Windows avec Microsoft Excel. "
-            "L’accès au projet VBA doit être autorisé dans le Centre de gestion de la confidentialité.",
+        self.git_status = _label("État Git du dépôt courant", "status_line")
+        layout.addWidget(self.git_status)
+        self.git_files = QListWidget()
+        self.git_files.setSelectionMode(QListWidget.SelectionMode.NoSelection)
+        layout.addWidget(self.git_files, 1)
+
+        target_row = QHBoxLayout()
+        target_row.addWidget(_label("PUBLICATION", "section_label"))
+        self.git_target = QComboBox()
+        self.git_target.addItems(["Nouvelle branche", "main"])
+        self.git_target.currentTextChanged.connect(self._update_branch_field)
+        target_row.addWidget(self.git_target)
+        self.git_branch = QLineEdit("feature/ma-modification")
+        self.git_branch.setPlaceholderText("Nom de la nouvelle branche")
+        target_row.addWidget(self.git_branch, 1)
+        layout.addLayout(target_row)
+
+        commit_row = QHBoxLayout()
+        self.git_commit_message = QLineEdit()
+        self.git_commit_message.setPlaceholderText("Résumé des modifications (message de commit)")
+        commit_row.addWidget(self.git_commit_message, 1)
+        self.git_push_button = QPushButton("Publier les fichiers cochés")
+        self.git_push_button.setObjectName("primary_button")
+        self.git_push_button.clicked.connect(self._push_git_changes)
+        commit_row.addWidget(self.git_push_button)
+        layout.addLayout(commit_row)
+
+        notice = _label(
+            "Les identifiants ne sont pas enregistrés ici : configurez Git Credential Manager ou une clé SSH. "
+            "Le bouton crée un commit puis pousse uniquement les fichiers cochés.",
             "notice",
         )
-        self.macro_notice.setWordWrap(True)
-        if os.name != "nt":
-            self.macro_notice.setText(
-                "Sous Linux, les macros VBA ne peuvent pas être exécutées ici. "
-                "Choisissez un classeur et une procédure, puis le bouton indiquera le prérequis. "
-                "L’exécution nécessite Windows et Microsoft Excel."
-            )
-        layout.addWidget(self.macro_notice)
+        notice.setWordWrap(True)
+        layout.addWidget(notice)
+        self._refresh_git_status()
         return page
+
+    def _update_branch_field(self, target: str) -> None:
+        self.git_branch.setEnabled(target == "Nouvelle branche")
+
+    def _refresh_git_status(self) -> None:
+        try:
+            entries = self._git("status", "--porcelain=v1", "-z", "--untracked-files=all").split("\0")
+            branch = self._git("branch", "--show-current").strip()
+        except RuntimeError as error:
+            self.git_status.setText(f"Impossible de lire l’état Git : {error}")
+            QMessageBox.critical(self, "État Git indisponible", str(error))
+            return
+
+        self.git_files.clear()
+        index = 0
+        changed_count = 0
+        while index < len(entries):
+            entry = entries[index]
+            index += 1
+            if not entry:
+                continue
+            status, path = entry[:2], entry[3:]
+            if "R" in status or "C" in status:
+                index += 1
+            item = QListWidgetItem(f"{status}   {path}")
+            item.setData(Qt.ItemDataRole.UserRole, path)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            item.setCheckState(Qt.CheckState.Unchecked)
+            self.git_files.addItem(item)
+            changed_count += 1
+
+        summary = f"Branche actuelle : {branch or '(détachée)'} · {changed_count} fichier(s) modifié(s)"
+        if changed_count == 0:
+            summary += " · aucun changement à publier"
+        self.git_status.setText(summary)
+
+    def _push_git_changes(self) -> None:
+        remote = self.git_remote.text().strip()
+        message = self.git_commit_message.text().strip()
+        paths = [
+            self.git_files.item(index).data(Qt.ItemDataRole.UserRole)
+            for index in range(self.git_files.count())
+            if self.git_files.item(index).checkState() == Qt.CheckState.Checked
+        ]
+        if not remote:
+            QMessageBox.warning(self, "Dépôt distant requis", "Saisissez l’URL HTTPS ou SSH du dépôt.")
+            return
+        if "://" in remote and "@" in remote.partition("://")[2].partition("/")[0]:
+            QMessageBox.warning(
+                self,
+                "Identifiants dans l’URL",
+                "Ne placez pas de mot de passe ou de jeton dans l’URL. "
+                "Utilisez Git Credential Manager ou une clé SSH.",
+            )
+            return
+        if not paths:
+            QMessageBox.warning(self, "Aucun fichier sélectionné", "Cochez au moins un fichier à publier.")
+            return
+        if not message:
+            QMessageBox.warning(self, "Message requis", "Saisissez un résumé des modifications.")
+            return
+
+        if self.git_target.currentText() == "main":
+            target_branch = "main"
+        else:
+            target_branch = self.git_branch.text().strip()
+            if not target_branch:
+                QMessageBox.warning(self, "Nom de branche requis", "Saisissez le nom de la nouvelle branche.")
+                return
+            try:
+                self._git("check-ref-format", "--branch", target_branch)
+            except RuntimeError as error:
+                QMessageBox.warning(self, "Nom de branche invalide", str(error))
+                return
+
+        answer = QMessageBox.question(
+            self,
+            "Confirmer la publication",
+            f"Créer un commit pour {len(paths)} fichier(s) et le pousser vers « {target_branch} » ?\n\n"
+            + "\n".join(paths),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        self.git_push_button.setEnabled(False)
+        self.refresh_git_button.setEnabled(False)
+        self.git_status.setText("Création du commit et publication en cours…")
+        task = GitPushTask(remote, target_branch, message, paths)
+        self.git_task = task
+        task.signals.finished.connect(self._git_push_finished)
+        task.signals.failed.connect(self._git_push_failed)
+        self.pool.start(task)
+
+    def _git_push_finished(self) -> None:
+        self.git_task = None
+        self.git_push_button.setEnabled(True)
+        self.refresh_git_button.setEnabled(True)
+        self.git_commit_message.clear()
+        self._refresh_git_status()
+        QMessageBox.information(self, "Publication terminée", "Les fichiers sélectionnés ont été publiés.")
+
+    def _git_push_failed(self, error: str) -> None:
+        self.git_task = None
+        self.git_push_button.setEnabled(True)
+        self.refresh_git_button.setEnabled(True)
+        self.git_status.setText(f"Échec de la publication : {error}")
+        QMessageBox.critical(self, "Publication Git impossible", error)
 
     def _build_roadmap_page(self) -> QWidget:
         page, layout = self._page()
@@ -392,7 +509,7 @@ class MainWindow(QMainWindow):
             #description { color: #35483d; font-size: 12px; line-height: 1.5; }
             #team_note { color: #67562d; background: #fff5dc; border-left: 3px solid #d3a64e; padding: 9px 11px; }
             #count_badge { background: #edf1dd; color: #4b5b31; border-radius: 4px; padding: 8px 12px; font-weight: 700; }
-            #asset_list, QListWidget, QTabWidget::pane { background: #ffffff; border: 1px solid #e2e6de; border-radius: 5px; }
+            #asset_list, QListWidget { background: #ffffff; border: 1px solid #e2e6de; border-radius: 5px; }
             QListWidget::item { padding: 10px 9px; border-bottom: 1px solid #eef0ea; }
             QListWidget::item:selected { background: #e5f1e9; color: #263a30; }
             QLineEdit, QComboBox { background: #ffffff; border: 1px solid #d9ded6; border-radius: 4px; padding: 9px 10px; min-height: 20px; }
@@ -404,21 +521,6 @@ class MainWindow(QMainWindow):
             #roadmap { background: #ffffff; color: #293831; border: 1px solid #e2e6de; border-radius: 5px; padding: 16px; }
             #status_line { background: #eaf2ed; color: #365344; padding: 9px 12px; border-radius: 4px; }
             #notice { color: #745d2f; background: #fff5df; border-left: 3px solid #d3a64e; padding: 10px 12px; }
-            QTableView {
-                background: #ffffff;
-                alternate-background-color: #f2f6f3;
-                color: #293831;
-                selection-background-color: #d5e9dc;
-                selection-color: #203a2c;
-                border: 1px solid #e2e6de;
-                gridline-color: #edf0ea;
-            }
-            QTableView::item { background: #ffffff; color: #293831; }
-            QTableView::item:alternate { background: #f2f6f3; color: #293831; }
-            QTableView::item:selected { background: #d5e9dc; color: #203a2c; }
-            QHeaderView::section { background: #edf3ef; border: 0; padding: 7px; font-weight: 650; }
-            QProgressBar { border: 0; background: #e5e9e1; height: 4px; }
-            QProgressBar::chunk { background: #75ad83; }
         """)
 
     def _navigate(self, index: int) -> None:
@@ -439,7 +541,6 @@ class MainWindow(QMainWindow):
         vba_count = sum(item.kind == "VBA" for item in self.items)
         python_count = sum(item.kind == "Python" for item in self.items)
         self.catalog_count.setText(f"{vba_count} modules VBA   ·   {python_count} scripts Python")
-        self._refresh_macro_selector()
         self.filter_catalog()
 
     def filter_catalog(self, *_args: object) -> None:
@@ -499,7 +600,6 @@ class MainWindow(QMainWindow):
             self.related_list.addItem(entry)
         self.launch_button.setText("Lancer le script" if item.kind == "Python" else "Script Python uniquement")
         self.launch_button.setEnabled(item.kind == "Python" and self.python_process is None)
-        self._refresh_macro_selector()
 
     def _open_related(self, current: QListWidgetItem | None, _previous: QListWidgetItem | None) -> None:
         if current is None:
@@ -527,10 +627,62 @@ class MainWindow(QMainWindow):
         self.refresh_catalog()
 
     def _open_source(self) -> None:
-        if self.current_item is not None:
-            from PySide6.QtGui import QDesktopServices
-            from PySide6.QtCore import QUrl
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.current_item.path)))
+        if self.current_item is None:
+            return
+        path = self.current_item.path
+        try:
+            raw = path.read_bytes()
+            if path.suffix.lower() == ".py":
+                with tokenize.open(path) as source:
+                    content = source.read()
+                    encoding = source.encoding
+            else:
+                for encoding in ("utf-8-sig", "cp1252"):
+                    try:
+                        content = raw.decode(encoding)
+                        break
+                    except UnicodeDecodeError:
+                        continue
+                else:
+                    raise UnicodeError("Le fichier n’est ni en UTF-8 ni en Windows-1252.")
+        except (OSError, SyntaxError, UnicodeError) as error:
+            QMessageBox.critical(self, "Ouverture impossible", f"Impossible de lire le fichier source :\n{error}")
+            return
+
+        newline = "\r\n" if b"\r\n" in raw else "\n"
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Modifier {path.name}")
+        dialog.resize(1000, 700)
+        layout = QVBoxLayout(dialog)
+        layout.addWidget(_label(str(path), "muted"))
+        editor = QPlainTextEdit()
+        editor.setPlainText(content)
+        layout.addWidget(editor, 1)
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+        )
+        save_button = buttons.button(QDialogButtonBox.StandardButton.Save)
+        save_button.setText("Enregistrer")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Annuler")
+        buttons.rejected.connect(dialog.reject)
+
+        def save_source(_checked: bool = False) -> None:
+            try:
+                with path.open("w", encoding=encoding, newline="") as source:
+                    source.write(editor.toPlainText().replace("\n", newline))
+            except (OSError, UnicodeError) as error:
+                QMessageBox.critical(
+                    dialog, "Enregistrement impossible", f"Impossible d’enregistrer le fichier :\n{error}"
+                )
+                return
+            dialog.accept()
+
+        save_button.clicked.connect(save_source)
+        layout.addWidget(buttons)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self.script_status.setText(f"Fichier enregistré : {path.name}")
+        self._refresh_git_status()
 
     def _launch_python(self) -> None:
         if self.current_item is None or self.current_item.kind != "Python":
@@ -563,237 +715,6 @@ class MainWindow(QMainWindow):
     def _python_error(self, _error: QProcess.ProcessError) -> None:
         if self.python_process is not None:
             self.script_status.setText(f"Impossible de lancer le script : {self.python_process.errorString()}")
-
-    def _browse_workbook(self) -> None:
-        if self.workbook_task is not None or self.macro_task is not None:
-            return
-        dialog = QFileDialog(
-            self,
-            "Choisir un classeur Excel",
-            str(ROOT),
-            "Classeurs Excel (*.xlsx *.xlsm *.xltx *.xltm)",
-        )
-        dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
-        dialog.setOption(QFileDialog.Option.DontUseNativeDialog)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return
-        selected_files = dialog.selectedFiles()
-        file_path = selected_files[0] if selected_files else ""
-        if not file_path:
-            return
-
-        self.workbook_preview = None
-        self.workbook_path.setText(file_path)
-        self.workbook_path.setToolTip("")
-        self.workbook_status.setText("Ouverture du classeur et préparation de l’aperçu…")
-        self.workbook_status.setToolTip("")
-        self.sheet_tabs.clear()
-        self.workbook_progress.setRange(0, 0)
-        self.workbook_progress.show()
-        self.browse_workbook_button.setEnabled(False)
-        self._update_macro_enabled()
-
-        task = WorkbookLoadTask(Path(file_path))
-        self.workbook_task = task
-        task.signals.progress.connect(self._workbook_progress)
-        task.signals.loaded.connect(self._workbook_loaded)
-        task.signals.failed.connect(self._workbook_failed)
-        self.pool.start(task)
-
-    def _workbook_progress(self, message: str) -> None:
-        self.workbook_status.setText(message)
-
-    def _workbook_loaded(self, preview: WorkbookPreview) -> None:
-        try:
-            self._show_workbook_preview(preview)
-        except Exception as error:
-            self._workbook_failed(f"Impossible d’afficher l’aperçu : {error}")
-            return
-        self.workbook_preview = preview
-        self.workbook_status.setText(
-            f"Aperçu prêt · {len(preview.sheets)} feuille(s) · 30 lignes × 16 colonnes maximum · source inchangée"
-        )
-        self.workbook_status.setToolTip("")
-        self._finish_workbook_load()
-
-    def _workbook_failed(self, error: str) -> None:
-        self.workbook_preview = None
-        self.workbook_status.setText(f"Échec de lecture du classeur : {error}")
-        self.workbook_path.setToolTip(error)
-        self._finish_workbook_load()
-        QMessageBox.critical(self, "Lecture du classeur impossible", error)
-
-    def _finish_workbook_load(self) -> None:
-        self.workbook_task = None
-        self.workbook_progress.hide()
-        self.browse_workbook_button.setEnabled(self.macro_task is None)
-        self._update_macro_enabled()
-
-    def _show_workbook_preview(self, preview: WorkbookPreview) -> None:
-        self.sheet_tabs.clear()
-        for sheet in preview.sheets:
-            table = QTableView()
-            palette = table.palette()
-            palette.setColor(QPalette.ColorRole.Base, QColor("#ffffff"))
-            palette.setColor(QPalette.ColorRole.AlternateBase, QColor("#f2f6f3"))
-            palette.setColor(QPalette.ColorRole.Text, QColor("#293831"))
-            palette.setColor(QPalette.ColorRole.Highlight, QColor("#d5e9dc"))
-            palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#203a2c"))
-            table.setPalette(palette)
-            table.setModel(PreviewTableModel(sheet))
-            table.setAlternatingRowColors(True)
-            table.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
-            table.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
-            table.verticalHeader().setDefaultSectionSize(27)
-            table.resizeColumnsToContents()
-            self.sheet_tabs.addTab(table, sheet.name)
-
-    def _refresh_macro_selector(self) -> None:
-        if not hasattr(self, "macro_selector"):
-            return
-        previous_path = self.current_item.relative_path if self.current_item and self.current_item.kind == "VBA" else None
-        self.macro_selector.blockSignals(True)
-        self.macro_selector.clear()
-        for item in self.items:
-            if item.kind == "VBA":
-                self.macro_selector.addItem(f"{item.title}   ·   {item.folder}", item.relative_path)
-        if previous_path:
-            index = self.macro_selector.findData(previous_path)
-            if index >= 0:
-                self.macro_selector.setCurrentIndex(index)
-        self.macro_selector.blockSignals(False)
-        self._select_macro_from_workbook()
-
-    def _selected_macro(self) -> CatalogItem | None:
-        relative_path = self.macro_selector.currentData()
-        return next((item for item in self.items if item.relative_path == relative_path), None)
-
-    def _select_macro_from_workbook(self, *_args: object) -> None:
-        item = self._selected_macro()
-        self.macro_procedure.clear()
-        if item:
-            self.macro_procedure.addItems(item.entrypoints)
-        self._update_macro_enabled()
-
-    def _update_macro_enabled(self) -> None:
-        allowed = (
-            self.workbook_preview is not None
-            and self._selected_macro() is not None
-            and self.macro_procedure.count() > 0
-            and self.workbook_task is None
-            and self.macro_task is None
-        )
-        self.run_macro_button.setEnabled(allowed)
-        if allowed and os.name != "nt":
-            self.run_macro_button.setToolTip(
-                "L’exécution VBA nécessite Windows et Microsoft Excel. Cliquez pour afficher les détails."
-            )
-        elif not allowed:
-            self.run_macro_button.setToolTip("Choisissez un classeur Excel et une procédure VBA publique.")
-        else:
-            self.run_macro_button.setToolTip("")
-
-    def _run_macro(self) -> None:
-        item = self._selected_macro()
-        if self.workbook_preview is None or item is None or not self.macro_procedure.currentText():
-            return
-        if os.name != "nt":
-            message = (
-                "L’exécution VBA n’est pas disponible sous Linux. Elle nécessite un poste Windows avec "
-                "Microsoft Excel et pywin32. Aucun fichier n’a été modifié."
-            )
-            self.workbook_status.setText("Exécution indisponible : Windows et Microsoft Excel sont requis.")
-            QMessageBox.information(self, "Excel VBA non disponible", message)
-            return
-        output_path = self._choose_macro_output_path(self.workbook_preview.path)
-        if output_path is None:
-            return
-        answer = QMessageBox.warning(
-            self,
-            "Exécuter une macro VBA",
-            "Les macros modifient potentiellement le classeur et les fichiers liés. "
-            f"Le classeur complet sera enregistré dans « {output_path} ». "
-            "N’exécutez que du code que vous avez vérifié. Continuer ?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-            QMessageBox.StandardButton.Cancel,
-        )
-        if answer != QMessageBox.StandardButton.Yes:
-            return
-        task = MacroTask(
-            self.workbook_preview.path, item.path, self.macro_procedure.currentText(), output_path
-        )
-        self.macro_task = task
-        self.run_macro_button.setEnabled(False)
-        self.workbook_status.setText(f"Création et traitement de la copie complète : {output_path}")
-        self.workbook_progress.setRange(0, 0)
-        self.workbook_progress.show()
-        self.browse_workbook_button.setEnabled(False)
-        task.signals.progress.connect(self._macro_progress)
-        task.signals.finished.connect(self._macro_finished)
-        task.signals.failed.connect(self._macro_failed)
-        self.pool.start(task)
-
-    def _macro_progress(self, message: str) -> None:
-        self.workbook_status.setText(message)
-
-    def _choose_macro_output_path(self, source: Path) -> Path | None:
-        suggested_path = source.with_name(f"{source.stem}_avec_macro.xlsm")
-        suffix = 2
-        while suggested_path.exists():
-            suggested_path = source.with_name(f"{source.stem}_avec_macro_{suffix}.xlsm")
-            suffix += 1
-        dialog = QFileDialog(
-            self,
-            "Enregistrer la copie complète avec la macro",
-            str(suggested_path.parent),
-            "Classeur Excel avec macros (*.xlsm)",
-        )
-        dialog.setAcceptMode(QFileDialog.AcceptMode.AcceptSave)
-        dialog.setFileMode(QFileDialog.FileMode.AnyFile)
-        dialog.setDefaultSuffix("xlsm")
-        dialog.setOption(QFileDialog.Option.DontUseNativeDialog)
-        dialog.setOption(QFileDialog.Option.DontConfirmOverwrite)
-        dialog.selectFile(suggested_path.name)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return None
-        selected_files = dialog.selectedFiles()
-        if not selected_files:
-            return None
-
-        output_path = Path(selected_files[0]).expanduser().resolve()
-        if output_path.suffix.lower() != ".xlsm":
-            QMessageBox.warning(self, "Format de sortie invalide", "Choisissez un nom de fichier se terminant par .xlsm.")
-            return None
-        if output_path == source.expanduser().resolve():
-            QMessageBox.warning(
-                self, "Choisir un autre fichier", "Le fichier original ne peut pas être utilisé comme destination."
-            )
-            return None
-        if output_path.exists():
-            QMessageBox.warning(
-                self,
-                "Choisir un autre fichier",
-                f"Le fichier existe déjà :\n{output_path}\n\nChoisissez un autre nom pour protéger le fichier existant.",
-            )
-            return None
-        return output_path
-
-    def _macro_finished(self, output: str) -> None:
-        self.workbook_status.setText(f"Copie créée : {output}")
-        self.workbook_progress.hide()
-        self.macro_task = None
-        self.browse_workbook_button.setEnabled(True)
-        self._update_macro_enabled()
-
-    def _macro_failed(self, error: str) -> None:
-        self.workbook_status.setText(f"Échec de la macro : {error}")
-        self.workbook_status.setToolTip(error)
-        self.workbook_progress.hide()
-        QMessageBox.critical(self, "Échec de la macro", error)
-        self.macro_task = None
-        self.browse_workbook_button.setEnabled(True)
-        self._update_macro_enabled()
-
 
 def main() -> int:
     application = QApplication(sys.argv)
