@@ -59,7 +59,9 @@ Le script est lancé avec le même interpréteur Python que l’application ; so
 3. Ouvrir **Gestion Git**, vérifier l’URL du dépôt distant et actualiser l’état.
 4. Cocher uniquement les fichiers à publier, choisir une nouvelle branche ou `main`, écrire le message de commit, puis confirmer.
 
-La publication configure le remote `origin`, crée un commit pour les seuls fichiers cochés et pousse vers la branche choisie. Les fichiers non cochés restent hors du commit. Les changements déjà indexés manuellement bloquent l’opération afin d’éviter de les inclure par erreur. La sélection de `main` nécessite que cette branche existe localement. Les identifiants ne sont pas demandés ni stockés par l’application : configurez-les dans Git Credential Manager ou utilisez SSH. Une publication échouée affiche le message de Git ; le commit local reste présent pour permettre une nouvelle tentative.
+La publication configure le remote `origin`, crée un commit pour les seuls fichiers cochés et pousse vers la branche choisie. Les fichiers non cochés restent hors du commit. Les changements déjà indexés manuellement bloquent l’opération afin d’éviter de les inclure par erreur. La sélection de `main` nécessite que cette branche existe localement.
+
+Pour un dépôt HTTPS, l’utilisateur peut saisir son nom de compte et son jeton dans les champs de la page. Ils ne sont pas sauvegardés et ne sont utilisés que pendant le push ; le champ du jeton est masqué et son fichier temporaire protégé est supprimé à la fin de l’opération. GitHub demande un jeton personnel (PAT) à la place du mot de passe du compte. Pour une URL SSH, laissez les champs vides et configurez la clé SSH dans Git. Sans identifiants saisis, la publication s’appuie sur la méthode d’authentification Git déjà configurée.
 
 ## Technologies utilisées
 
@@ -73,7 +75,7 @@ La publication configure le remote `origin`, crée un commit pour les seuls fich
 ## Sécurité
 
 - La publication pousse les fichiers explicitement cochés, mais le contenu de ceux-ci doit être relu avant validation. La confirmation affiche les chemins concernés.
-- Ne placez jamais de mot de passe ou de jeton dans l’URL du dépôt. Git Credential Manager ou une clé SSH gère l’authentification sans transmettre les secrets à l’application.
+- Ne placez jamais de mot de passe ou de jeton dans l’URL du dépôt. L’application refuse les URL avec identifiants intégrés. Les jetons HTTPS saisis dans l’interface ne sont pas conservés après le push ; configurez plutôt une clé SSH ou le gestionnaire d’identifiants Git si vous souhaitez enregistrer votre authentification.
 - Les scripts Python sont lancés tels quels avec les droits du compte utilisateur. Ils peuvent eux aussi modifier des fichiers, ouvrir des fenêtres ou nécessiter des dépendances et ressources supplémentaires.
 
 ## Tests

@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
+import tempfile
 import tokenize
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Generator
 
 from PySide6.QtCore import (
     QProcess,
@@ -57,6 +61,8 @@ class GitPushTask(QRunnable):
         target_branch: str,
         message: str,
         paths: list[str],
+        username: str = "",
+        token: str = "",
         repo_path: Path = ROOT,
     ):
         super().__init__()
@@ -64,6 +70,8 @@ class GitPushTask(QRunnable):
         self.target_branch = target_branch
         self.message = message
         self.paths = paths
+        self.username = username
+        self.token = token
         self.repo_path = repo_path
         self.signals = GitTaskSignals()
 
@@ -100,13 +108,76 @@ class GitPushTask(QRunnable):
                             f"{error}\nLes changements n’ont pas pu être désindexés : {reset_error}"
                         ) from error
                     raise
-            self._git("push", "-u", "origin", self.target_branch, cwd=self.repo_path)
+            with self._askpass_environment() as auth_environment:
+                self._git(
+                    "push",
+                    "-u",
+                    "origin",
+                    self.target_branch,
+                    cwd=self.repo_path,
+                    extra_env=auth_environment,
+                )
             self.signals.finished.emit()
         except Exception as error:
-            self.signals.failed.emit(str(error))
+            message = str(error)
+            for secret in (self.username, self.token):
+                if secret:
+                    message = message.replace(secret, "[masqué]")
+            self.signals.failed.emit(message)
+        finally:
+            self.username = ""
+            self.token = ""
+
+    @contextmanager
+    def _askpass_environment(self) -> Generator[dict[str, str], None, None]:
+        if not self.username and not self.token:
+            yield {}
+            return
+
+        with tempfile.TemporaryDirectory(prefix="git-askpass-") as directory:
+            temporary_directory = Path(directory)
+            credentials_path = temporary_directory / "credentials.json"
+            credentials_path.write_text(
+                json.dumps({"username": self.username, "token": self.token}),
+                encoding="utf-8",
+            )
+            credentials_path.chmod(0o600)
+
+            helper_path = temporary_directory / "askpass.py"
+            helper_path.write_text(
+                "import json, os, sys\n"
+                "with open(os.environ['GIT_GUI_CREDENTIALS_FILE'], encoding='utf-8') as source:\n"
+                "    credentials = json.load(source)\n"
+                "prompt = sys.argv[1].casefold() if len(sys.argv) > 1 else ''\n"
+                "key = 'token' if 'password' in prompt or 'token' in prompt else 'username'\n"
+                "print(credentials[key])\n",
+                encoding="utf-8",
+            )
+            askpass_path = temporary_directory / ("askpass.cmd" if os.name == "nt" else "askpass")
+            if os.name == "nt":
+                askpass_path.write_text(
+                    f'@"{sys.executable}" "{helper_path}" %*\r\n',
+                    encoding="utf-8",
+                )
+            else:
+                askpass_path.write_text(
+                    f"#!/bin/sh\nexec {shlex.quote(sys.executable)} "
+                    f"{shlex.quote(str(helper_path))} \"$@\"\n",
+                    encoding="utf-8",
+                )
+                askpass_path.chmod(0o700)
+            yield {
+                "GIT_ASKPASS": str(askpass_path),
+                "GIT_GUI_CREDENTIALS_FILE": str(credentials_path),
+            }
 
     @staticmethod
-    def _git(*args: str, cwd: Path = ROOT, check: bool = True) -> str:
+    def _git(
+        *args: str,
+        cwd: Path = ROOT,
+        check: bool = True,
+        extra_env: dict[str, str] | None = None,
+    ) -> str:
         try:
             result = subprocess.run(
                 ["git", *args],
@@ -116,7 +187,7 @@ class GitPushTask(QRunnable):
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+                env={**os.environ, **(extra_env or {}), "GIT_TERMINAL_PROMPT": "0"},
             )
         except OSError as error:
             raise RuntimeError(f"Impossible de lancer Git : {error}") from error
@@ -320,6 +391,17 @@ class MainWindow(QMainWindow):
         remote_row.addWidget(self.refresh_git_button)
         layout.addLayout(remote_row)
 
+        credentials_row = QHBoxLayout()
+        credentials_row.addWidget(_label("COMPTE HTTPS", "section_label"))
+        self.git_username = QLineEdit()
+        self.git_username.setPlaceholderText("Nom d’utilisateur")
+        credentials_row.addWidget(self.git_username)
+        self.git_token = QLineEdit()
+        self.git_token.setPlaceholderText("Jeton d’accès personnel (pas le mot de passe GitHub)")
+        self.git_token.setEchoMode(QLineEdit.EchoMode.Password)
+        credentials_row.addWidget(self.git_token, 1)
+        layout.addLayout(credentials_row)
+
         self.git_status = _label("État Git du dépôt courant", "status_line")
         layout.addWidget(self.git_status)
         self.git_files = QListWidget()
@@ -348,7 +430,9 @@ class MainWindow(QMainWindow):
         layout.addLayout(commit_row)
 
         notice = _label(
-            "Les identifiants ne sont pas enregistrés ici : configurez Git Credential Manager ou une clé SSH. "
+            "Pour HTTPS, saisissez votre nom d’utilisateur et votre jeton : ils servent uniquement à cette publication "
+            "et ne sont pas conservés. GitHub exige un jeton personnel, pas le mot de passe du compte. "
+            "Laissez les champs vides pour utiliser l’authentification Git déjà configurée, par exemple SSH. "
             "Le bouton crée un commit puis pousse uniquement les fichiers cochés.",
             "notice",
         )
@@ -394,6 +478,8 @@ class MainWindow(QMainWindow):
 
     def _push_git_changes(self) -> None:
         remote = self.git_remote.text().strip()
+        username = self.git_username.text()
+        token = self.git_token.text()
         message = self.git_commit_message.text().strip()
         paths = [
             self.git_files.item(index).data(Qt.ItemDataRole.UserRole)
@@ -409,6 +495,21 @@ class MainWindow(QMainWindow):
                 "Identifiants dans l’URL",
                 "Ne placez pas de mot de passe ou de jeton dans l’URL. "
                 "Utilisez Git Credential Manager ou une clé SSH.",
+            )
+            return
+        if bool(username) != bool(token):
+            QMessageBox.warning(
+                self,
+                "Identifiants incomplets",
+                "Renseignez à la fois le nom d’utilisateur et le jeton, ou laissez les deux champs vides.",
+            )
+            return
+        if username and not remote.lower().startswith("https://"):
+            QMessageBox.warning(
+                self,
+                "Authentification HTTPS requise",
+                "Les identifiants saisis dans cette rubrique sont utilisables avec une URL HTTPS. "
+                "Pour une URL SSH, laissez les champs vides et utilisez la clé SSH configurée dans Git.",
             )
             return
         if not paths:
@@ -445,8 +546,10 @@ class MainWindow(QMainWindow):
         self.git_push_button.setEnabled(False)
         self.refresh_git_button.setEnabled(False)
         self.git_status.setText("Création du commit et publication en cours…")
-        task = GitPushTask(remote, target_branch, message, paths)
+        task = GitPushTask(remote, target_branch, message, paths, username=username, token=token)
         self.git_task = task
+        self.git_username.clear()
+        self.git_token.clear()
         task.signals.finished.connect(self._git_push_finished)
         task.signals.failed.connect(self._git_push_failed)
         self.pool.start(task)
