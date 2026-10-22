@@ -1,89 +1,169 @@
 # Bibliothèque d’outils métier
 
-Application de bureau pour parcourir et modifier les modules VBA (`.bas`) et scripts Python du workspace, comprendre leurs traitements, lancer les scripts Python et publier les changements avec Git.
+Application de bureau pour parcourir, comprendre et modifier les scripts Python et modules VBA de l’équipe. Elle permet aussi de créer un commit et de publier les fichiers sélectionnés vers un dépôt Git distant, sans demander aux utilisateurs de manipuler les commandes Git courantes.
 
-## Prérequis
+- [Installation et lancement](#installation-et-lancement)
+- [Utiliser la bibliothèque](#utiliser-la-bibliothèque)
+- [Modifier un fichier et le publier avec Git](#modifier-un-fichier-et-le-publier-avec-git)
+- [Configurer un jeton GitHub](#configurer-un-jeton-github)
+- [Résoudre les problèmes Git courants](#résoudre-les-problèmes-git-courants)
+- [Dépendances et tests](#dépendances-et-tests)
+- [Conception de l’application (SDD)](./SDD.md)
 
-- Python 3.10 ou plus récent.
-- Un environnement graphique pris en charge par Qt 6.
-- Git installé et configuré, avec un accès au dépôt distant via Git Credential Manager ou une clé SSH.
+Le guide utilisateur intégré à l’application se trouve également dans [ROADMAP.md](./ROADMAP.md).
 
 ## Installation et lancement
 
-Depuis la racine du dépôt, créer un environnement virtuel et installer les dépendances :
+### Prérequis
+
+- Python 3.10 ou plus récent.
+- Git installé et disponible dans le terminal et le `PATH`.
+- Une interface graphique compatible avec Qt 6.
+- Un compte autorisé sur le dépôt distant pour pousser des modifications.
+
+Une archive ZIP téléchargée depuis GitHub **n’est pas un dépôt Git**. Clonez le dépôt avec Git afin que l’application puisse consulter son état, créer des commits et pousser des branches.
 
 ### Linux
 
+Depuis un terminal :
+
 ```bash
+git clone https://github.com/<organisation>/<depot>.git
+cd <depot>
 python3 -m venv .venv
 source .venv/bin/activate
+python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python main.py
 ```
+
+Sur une installation Ubuntu/Debian minimale, les bibliothèques système requises par Qt peuvent devoir être installées par l’équipe informatique.
 
 ### Windows
 
+Depuis PowerShell :
+
 ```powershell
+git clone https://github.com/<organisation>/<depot>.git
+Set-Location <depot>
 py -3 -m venv .venv
-.venv\Scripts\Activate.ps1
+.\.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 python main.py
 ```
 
-Si PowerShell interdit l’activation du script, utiliser `cmd.exe` et lancer `.venv\Scripts\activate.bat`.
+Si l’activation PowerShell est bloquée, ouvrir `cmd.exe` dans le dépôt et utiliser :
 
-## Utilisation
+```bat
+py -3 -m venv .venv
+.venv\Scripts\activate.bat
+python -m pip install -r requirements.txt
+python main.py
+```
 
-### Bibliothèque
+## Utiliser la bibliothèque
 
-La page **Bibliothèque** recense les fichiers `.bas` et `.py` sous les dossiers métier. Le champ de recherche accepte un nom de fichier, une procédure ou un dossier ; le filtre sépare VBA et Python.
+La page **Bibliothèque** recense les fichiers `.bas` et `.py` des dossiers métier. La recherche accepte un nom de fichier, une procédure ou un dossier ; le filtre permet d’afficher les modules VBA ou les scripts Python.
 
-En sélectionnant un élément, l’application affiche les procédures détectées ainsi que les fichiers du même dossier et les appels VBA directs reconnus. Sélectionner un fichier lié dans cette liste ouvre sa fiche.
+La fiche d’un fichier présente un résumé indicatif de son utilité, les procédures reconnues et les liens détectés avec des fichiers du même dossier. Le résumé est généré automatiquement à partir du code : il peut être incomplet ou général et ne remplace pas une revue métier ou technique.
 
-La zone **Utilité** est un résumé automatique des opérations reconnues dans le code. Elle ne reprend pas les commentaires, docstrings, noms de procédures, noms de feuilles, noms de personnes ou dates ; elle peut donc rester générale si le traitement n’est pas reconnu. Les rapprochements automatiques ne remplacent pas une revue du code par un référent métier.
-
-Le bouton **Ajouter une note métier** permet de saisir un complément validé par l’équipe. Ce texte est conservé séparément dans `module_descriptions.json` et ne modifie pas le résumé déduit du code. Cette note libre n’est pas anonymisée automatiquement : ne pas y saisir de données personnelles ou confidentielles.
+**Ajouter une note métier** permet de conserver un complément dans `module_descriptions.json`. Ne mettez pas dans cette note de donnée personnelle, de secret ni d’information confidentielle.
 
 ### Lancer un script Python
 
-1. Sélectionner un fichier Python dans la bibliothèque.
-2. Cliquer sur **Lancer le script**.
-3. Lire l’état dans la fiche. Les éventuelles fenêtres et sorties du script apparaissent séparément de la bibliothèque, selon le comportement propre du script.
+1. Sélectionnez un fichier Python dans la bibliothèque.
+2. Cliquez sur **Lancer le script**.
+3. Suivez le statut et les éventuelles fenêtres ou sorties produites par le script.
 
-Le script est lancé avec le même interpréteur Python que l’application ; son répertoire de travail est son dossier source. Certains scripts ouvrent leur propre interface, demandent des fichiers ou créent des classeurs et d’autres résultats. Le bouton lance le script tel quel : il ne transforme pas une ancienne interface Tkinter en interface Qt.
+Le script est lancé avec l’interpréteur Python de l’application et avec son dossier source comme répertoire de travail. Les scripts s’exécutent avec les droits de l’utilisateur et peuvent modifier des fichiers ou demander des dépendances supplémentaires.
 
-### Modifier une source et publier avec Git
+## Modifier un fichier et le publier avec Git
 
-1. Dans la **Bibliothèque**, sélectionner un fichier `.py` ou `.bas`, puis cliquer sur **Ouvrir le fichier source**.
-2. Modifier le texte et cliquer sur **Enregistrer**. Le fichier est enregistré avec son encodage et ses fins de ligne.
-3. Ouvrir **Gestion Git**, vérifier l’URL du dépôt distant et actualiser l’état.
-4. Cocher uniquement les fichiers à publier, choisir une nouvelle branche ou `main`, écrire le message de commit, puis confirmer.
+### Préparer le dépôt
 
-La publication configure le remote `origin`, crée un commit pour les seuls fichiers cochés et pousse vers la branche choisie. Les fichiers non cochés restent hors du commit. Les changements déjà indexés manuellement bloquent l’opération afin d’éviter de les inclure par erreur. La sélection de `main` nécessite que cette branche existe localement.
+Clonez le projet avec Git, puis ouvrez l’application à partir de ce dossier. Pour vérifier que Git est installé :
 
-Pour un dépôt HTTPS, l’utilisateur peut saisir son nom de compte et son jeton dans les champs de la page. Ils ne sont pas sauvegardés et ne sont utilisés que pendant le push ; le champ du jeton est masqué et son fichier temporaire protégé est supprimé à la fin de l’opération. GitHub demande un jeton personnel (PAT) à la place du mot de passe du compte. Pour une URL SSH, laissez les champs vides et configurez la clé SSH dans Git. Sans identifiants saisis, la publication s’appuie sur la méthode d’authentification Git déjà configurée.
+```bash
+git --version
+```
 
-## Technologies utilisées
+Git enregistre l’auteur de chaque commit séparément des identifiants d’accès GitHub. Si aucun nom et aucune adresse ne sont configurés pour le dépôt, configurez-les une fois dans un terminal ouvert à sa racine :
 
-- **Python 3.10+** : application et logique d’inventaire.
-- **PySide6 / Qt 6** : fenêtres, navigation, listes et interactions.
-- **`ast` et expressions régulières** : découverte des procédures et analyse indicative des opérations Python/VBA.
-- **pandas et pdfplumber** : dépendances des outils Python existants de traitement de fichiers PDF et Excel.
-- **Git** : commit et publication des sources sélectionnées.
-- **`unittest`** : tests automatisés du catalogue, de l’éditeur et des comportements Qt pris en charge.
+```bash
+git config --local user.name "Prénom Nom"
+git config --local user.email "adresse-associée-au-compte@example.com"
+```
 
-## Sécurité
+Utilisez une adresse de commit appropriée à la politique de votre équipe, éventuellement l’adresse `noreply` fournie par GitHub. Cette identité est inscrite dans les commits ; elle ne permet pas de s’authentifier et n’accorde aucun droit d’écriture.
 
-- La publication pousse les fichiers explicitement cochés, mais le contenu de ceux-ci doit être relu avant validation. La confirmation affiche les chemins concernés.
-- Ne placez jamais de mot de passe ou de jeton dans l’URL du dépôt. L’application refuse les URL avec identifiants intégrés. Les jetons HTTPS saisis dans l’interface ne sont pas conservés après le push ; configurez plutôt une clé SSH ou le gestionnaire d’identifiants Git si vous souhaitez enregistrer votre authentification.
-- Les scripts Python sont lancés tels quels avec les droits du compte utilisateur. Ils peuvent eux aussi modifier des fichiers, ouvrir des fenêtres ou nécessiter des dépendances et ressources supplémentaires.
+### Publier avec la page Gestion Git
 
-## Tests
+1. Dans **Bibliothèque**, sélectionnez un fichier `.py` ou `.bas`, puis cliquez sur **Ouvrir le fichier source**.
+2. Modifiez le texte et cliquez sur **Enregistrer**. **Annuler** abandonne les modifications non enregistrées.
+3. Ouvrez la page **Gestion Git** et vérifiez l’URL HTTPS du dépôt distant. L’URL doit correspondre au dépôt cloné et au compte ou à l’organisation qui le possède. Le remote utilisé est `origin`.
+4. Pour une URL HTTPS, saisissez votre nom d’utilisateur et un jeton dans les champs d’identification. Pour une URL SSH, laissez ces champs vides et configurez votre clé SSH dans Git.
+5. Cliquez sur **Actualiser**. La liste indique les fichiers modifiés, supprimés ou non suivis.
+6. Cochez uniquement les fichiers qui doivent faire partie de ce changement. Vérifiez les chemins avant de continuer.
+7. Choisissez **Nouvelle branche** de préférence et indiquez un nom tel que `feature/description-outil` ou `fix/correction-export`, ou sélectionnez une branche existante affichée dans la liste. Les branches distantes connues sont indiquées comme « distante » ; la copie locale de suivi est créée automatiquement à la publication. Choisissez `main` seulement si votre équipe autorise le push direct.
+8. Écrivez un résumé clair du changement, par exemple `docs: clarifier les instructions Git`.
+9. Cliquez sur **Publier les fichiers cochés** et relisez la confirmation avant de valider.
+10. En cas de succès, le commit a été créé localement puis envoyé vers le dépôt distant.
 
-Depuis la racine du dépôt :
+L’application prépare uniquement les fichiers cochés. Les autres changements du dossier de travail restent non inclus. Si des fichiers étaient déjà indexés (`git add`) dans un terminal, l’opération est arrêtée afin de ne pas les inclure par erreur. Le commit est créé sur la branche sélectionnée ; une branche distante sans branche locale correspondante est d’abord créée en suivi de `origin`.
+
+Pour proposer un changement sur une nouvelle branche, ouvrez ensuite GitHub, comparez cette branche à `main` et créez une **Pull request** pour demander une revue. Les organisations peuvent exiger une Pull request et interdire les pushes directs sur `main`.
+
+### Nom d’utilisateur, mot de passe et jeton GitHub
+
+Le **nom d’utilisateur GitHub** est le nom de compte affiché sur le profil ou dans l’URL `https://github.com/nom-du-compte`. Ce n’est ni le nom complet ni l’adresse e-mail.
+
+GitHub n’accepte pas le mot de passe du compte pour une opération Git HTTPS. Créez un **Fine-grained personal access token** (« jeton d’accès personnel à accès limité ») :
+
+1. Connectez-vous avec le compte qui a accès au dépôt et ouvrez [la page de création de jeton GitHub](https://github.com/settings/personal-access-tokens/new).
+2. Donnez au jeton un nom reconnaissable et une date d’expiration.
+3. Choisissez comme **Resource owner** le compte ou l’organisation qui possède le dépôt.
+4. Dans **Repository access**, choisissez **Only select repositories**, puis sélectionnez uniquement le dépôt concerné.
+5. Dans **Repository permissions**, ajoutez **Contents** et choisissez **Read and write**. N’accordez pas de permissions supplémentaires sans nécessité.
+6. Générez le jeton et copiez-le immédiatement dans un endroit sûr. GitHub ne permet généralement pas d’afficher à nouveau sa valeur complète.
+7. Dans **Gestion Git**, entrez le nom de compte et collez le jeton dans le champ masqué **Jeton d’accès personnel**. Ne saisissez pas le mot de passe GitHub.
+
+Le compte doit lui-même disposer du droit d’écriture sur le dépôt. Un jeton ne permet pas de contourner les droits de l’organisation ; les jetons d’une organisation peuvent aussi nécessiter une approbation de son administrateur.
+
+L’application utilise les identifiants saisis uniquement pour le push en cours, ne les inscrit pas dans l’URL du dépôt ou dans la configuration Git, et les efface du formulaire lorsqu’elle démarre la publication. Pour l’authentification HTTPS, Git les lit à partir d’un fichier temporaire protégé, supprimé à la fin du traitement normal. Si les champs sont vides, Git utilise l’authentification déjà configurée, par exemple SSH.
+
+> Ne partagez jamais votre jeton et ne le commitez jamais dans le projet. En cas d’exposition, révoquez-le immédiatement dans les paramètres GitHub et créez-en un nouveau.
+
+## Résoudre les problèmes Git courants
+
+| Message ou situation | Que vérifier / faire |
+|---|---|
+| `Authentication failed` ou jeton refusé | Vérifier le nom de compte, l’expiration, les permissions `Contents: Read and write`, le dépôt sélectionné et les droits d’écriture du compte. Recréer ou faire approuver le jeton si besoin. |
+| `Repository not found` ou accès refusé | Vérifier l’URL HTTPS complète, le propriétaire, le dépôt cloné, les droits du compte et le propriétaire sélectionné dans le jeton. |
+| Aucun changement n’apparaît | Enregistrer le fichier source, cliquer sur **Actualiser** et vérifier que l’application a ouvert le dossier du dépôt cloné, pas une archive ZIP ou une autre copie. |
+| Échec lors du commit, identité inconnue | Définir `user.name` et `user.email` avec les commandes ci-dessus. Le nom d’utilisateur GitHub des champs HTTPS ne remplace pas cette identité. |
+| Push direct vers `main` refusé | La branche est probablement protégée. Publier sur une nouvelle branche et créer une Pull request. |
+| Push refusé après création du commit | Le commit reste dans le dépôt local. Vérifier l’accès et la branche ; si l’interface n’affiche plus de fichiers modifiés, demander de l’aide au référent pour transmettre le commit local. Ne pas utiliser `push --force`. |
+| Modifications déjà indexées | L’application bloque la publication pour éviter de mélanger des fichiers. Demander au référent de vérifier l’index avant de réessayer. |
+
+Pour les étapes détaillées destinées aux nouveaux utilisateurs, y compris la création du jeton et la Pull request, consulter [le guide Git intégré](./ROADMAP.md).
+
+## Dépendances et tests
+
+`requirements.txt` contient les dépendances Python de l’application, des outils métier existants et des tests. **Git est un programme système, pas une bibliothèque Python** : il doit être installé séparément et accessible depuis `PATH`.
+
+Exécuter la suite de tests depuis la racine du projet :
 
 ```bash
 python -m unittest discover -s tests
 ```
 
-Le guide de contribution pour ajouter un outil à un dépôt Git existant se trouve dans [ROADMAP.md](ROADMAP.md).
+Sur Linux sans écran :
+
+```bash
+QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests
+```
+
+## Conception et sécurité
+
+La description de l’architecture, des composants Git, des flux de données, des limites connues et des décisions de sécurité est documentée dans [SDD.md](./SDD.md) (Software Design Description).

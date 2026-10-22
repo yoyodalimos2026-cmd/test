@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+
+
 _VBA_PROCEDURE = re.compile(
     r"^\s*(?:(Public|Private|Friend|Static)\s+)?(?:Sub|Function)\s+([\wÀ-ÿ]+)",
     re.IGNORECASE | re.MULTILINE,

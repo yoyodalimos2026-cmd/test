@@ -3,5 +3,4 @@ __pycache__/
 *.py[cod]
 *.log
 ~$*
-*_avec_macro*.xlsm
 result_*.xlsx

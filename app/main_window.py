@@ -87,12 +87,25 @@ class GitPushTask(QRunnable):
             else:
                 self._git("remote", "set-url", "origin", self.remote, cwd=self.repo_path)
 
-            if self.target_branch == "main":
-                self._git("switch", "main", cwd=self.repo_path)
-            elif self._git(
+            if self._git(
                 "show-ref", "--verify", f"refs/heads/{self.target_branch}", check=False, cwd=self.repo_path
             ):
                 self._git("switch", self.target_branch, cwd=self.repo_path)
+            elif self._git(
+                "show-ref",
+                "--verify",
+                f"refs/remotes/origin/{self.target_branch}",
+                check=False,
+                cwd=self.repo_path,
+            ):
+                self._git(
+                    "switch",
+                    "--track",
+                    "-c",
+                    self.target_branch,
+                    f"origin/{self.target_branch}",
+                    cwd=self.repo_path,
+                )
             else:
                 self._git("switch", "-c", self.target_branch, cwd=self.repo_path)
 
@@ -109,11 +122,11 @@ class GitPushTask(QRunnable):
                         ) from error
                     raise
             with self._askpass_environment() as auth_environment:
+                push_args = ["push", "-u", "origin", self.target_branch]
+                if self.username and self.token:
+                    push_args = ["-c", "credential.helper=", *push_args]
                 self._git(
-                    "push",
-                    "-u",
-                    "origin",
-                    self.target_branch,
+                    *push_args,
                     cwd=self.repo_path,
                     extra_env=auth_environment,
                 )
@@ -411,8 +424,7 @@ class MainWindow(QMainWindow):
         target_row = QHBoxLayout()
         target_row.addWidget(_label("PUBLICATION", "section_label"))
         self.git_target = QComboBox()
-        self.git_target.addItems(["Nouvelle branche", "main"])
-        self.git_target.currentTextChanged.connect(self._update_branch_field)
+        self.git_target.currentIndexChanged.connect(self._update_branch_field)
         target_row.addWidget(self.git_target)
         self.git_branch = QLineEdit("feature/ma-modification")
         self.git_branch.setPlaceholderText("Nom de la nouvelle branche")
@@ -441,18 +453,49 @@ class MainWindow(QMainWindow):
         self._refresh_git_status()
         return page
 
-    def _update_branch_field(self, target: str) -> None:
-        self.git_branch.setEnabled(target == "Nouvelle branche")
+    def _update_branch_field(self, _index: int) -> None:
+        self.git_branch.setEnabled(self.git_target.currentData() == "__new_branch__")
+
+    def _refresh_branch_targets(self, local_branches: set[str], remote_branches: set[str]) -> None:
+        selected_target = self.git_target.currentData()
+        self.git_target.blockSignals(True)
+        self.git_target.clear()
+        self.git_target.addItem("Nouvelle branche", "__new_branch__")
+        if "main" in local_branches or "main" in remote_branches:
+            self.git_target.addItem("main", "main")
+
+        for branch in sorted(local_branches - {"main"}):
+            self.git_target.addItem(branch, branch)
+
+        remote_only_branches = remote_branches - local_branches - {"main"}
+        if remote_only_branches:
+            self.git_target.insertSeparator(self.git_target.count())
+            for branch in sorted(remote_only_branches):
+                self.git_target.addItem(f"{branch} (distante)", branch)
+
+        selected_index = self.git_target.findData(selected_target)
+        self.git_target.setCurrentIndex(selected_index if selected_index >= 0 else 0)
+        self.git_target.blockSignals(False)
+        self._update_branch_field(self.git_target.currentIndex())
 
     def _refresh_git_status(self) -> None:
         try:
             entries = self._git("status", "--porcelain=v1", "-z", "--untracked-files=all").split("\0")
             branch = self._git("branch", "--show-current").strip()
+            local_branches = set(self._git("branch", "--format=%(refname:short)").splitlines())
+            remote_branches = {
+                name.removeprefix("origin/")
+                for name in self._git(
+                    "branch", "-r", "--format=%(refname:short)"
+                ).splitlines()
+                if name.startswith("origin/") and name != "origin/HEAD"
+            }
         except RuntimeError as error:
             self.git_status.setText(f"Impossible de lire l’état Git : {error}")
             QMessageBox.critical(self, "État Git indisponible", str(error))
             return
 
+        self._refresh_branch_targets(local_branches, remote_branches)
         self.git_files.clear()
         index = 0
         changed_count = 0
@@ -519,9 +562,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Message requis", "Saisissez un résumé des modifications.")
             return
 
-        if self.git_target.currentText() == "main":
-            target_branch = "main"
-        else:
+        target_branch = self.git_target.currentData()
+        if target_branch == "__new_branch__":
             target_branch = self.git_branch.text().strip()
             if not target_branch:
                 QMessageBox.warning(self, "Nom de branche requis", "Saisissez le nom de la nouvelle branche.")
