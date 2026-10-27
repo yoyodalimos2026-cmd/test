@@ -14,53 +14,164 @@ Le guide utilisateur intégré à l’application se trouve également dans [ROA
 
 ## Installation et lancement
 
-### Prérequis
+Ce guide accompagne l’installation sur **Windows** et **Linux**, y compris si vous n’avez pas l’habitude d’utiliser un terminal. Il faut installer Python et Git, télécharger le projet avec Git, puis installer les bibliothèques dont l’application a besoin.
 
-- Python 3.10 ou plus récent.
-- Git installé et disponible dans le terminal et le `PATH`.
-- Une interface graphique compatible avec Qt 6.
-- Un compte autorisé sur le dépôt distant pour pousser des modifications.
+> Les commandes ci-dessous sont à copier dans le terminal indiqué. Pour utiliser l’application, vous n’avez pas besoin de connaître les commandes Git : seules quelques commandes de préparation sont nécessaires.
 
-Une archive ZIP téléchargée depuis GitHub **n’est pas un dépôt Git**. Clonez le dépôt avec Git afin que l’application puisse consulter son état, créer des commits et pousser des branches.
+### Étape 1 — Installer Python
 
-### Linux
+L’application nécessite **Python 3.10 ou plus récent**. Si vous devez choisir une version, installez **Python 3.12 en 64 bits**.
 
-Depuis un terminal :
+#### Windows
 
-```bash
-git clone https://github.com/<organisation>/<depot>.git
-cd <depot>
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python main.py
-```
-
-Sur une installation Ubuntu/Debian minimale, les bibliothèques système requises par Qt peuvent devoir être installées par l’équipe informatique.
-
-### Windows
-
-Depuis PowerShell :
+1. Ouvrez la [page officielle de téléchargement de Python pour Windows](https://www.python.org/downloads/windows/).
+2. Téléchargez l’installateur 64 bits pour Python 3.12 et ouvrez le fichier téléchargé.
+3. Dans la première fenêtre, cochez **Add python.exe to PATH** si cette option est proposée, puis cliquez sur **Install Now**.
+4. Une fois l’installation terminée, ouvrez **PowerShell** depuis le menu Démarrer.
+5. Vérifiez Python en copiant cette commande puis en appuyant sur Entrée :
 
 ```powershell
-git clone https://github.com/<organisation>/<depot>.git
-Set-Location <depot>
-py -3 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
-python main.py
+py -3.12 --version
 ```
 
-Si l’activation PowerShell est bloquée, ouvrir `cmd.exe` dans le dépôt et utiliser :
+Le résultat doit commencer par `Python 3.12`. Si `py` n’est pas reconnu, relancez l’installateur et vérifiez que le lanceur Python est installé, ou demandez de l’aide à votre support informatique.
 
-```bat
-py -3 -m venv .venv
-.venv\Scripts\activate.bat
-python -m pip install -r requirements.txt
-python main.py
+#### Linux
+
+Ouvrez l’application **Terminal** et vérifiez si Python est déjà installé :
+
+```bash
+python3 --version
 ```
+
+La version affichée doit être `3.10` ou plus récente. Si Python est absent ou plus ancien, installez une version récente depuis le magasin de logiciels de votre distribution ou demandez l’aide de votre support informatique. Il faut aussi installer le composant `venv`, utilisé pour isoler les bibliothèques de ce projet.
+
+**Ubuntu ou Debian :**
+
+```bash
+sudo apt update
+sudo apt install python3 python3-venv python3-pip
+```
+
+Le mot de passe demandé est celui de votre session Linux. Pendant sa saisie dans le terminal, aucun caractère ne s’affiche : saisissez-le puis appuyez sur Entrée.
+
+**Fedora :**
+
+```bash
+sudo dnf install python3 python3-pip
+```
+
+Sur une autre distribution Linux, utilisez son magasin de logiciels pour installer Python 3.10 ou plus récent et le module `venv`.
+
+### Étape 2 — Installer Git
+
+Git est un programme séparé de Python. Il est nécessaire pour que l’application puisse gérer les branches et publier les modifications.
+
+#### Windows
+
+1. Téléchargez Git depuis le [site officiel Git pour Windows](https://git-scm.com/download/win).
+2. Ouvrez l’installateur et conservez les choix proposés par défaut, sauf indication différente de votre équipe informatique.
+3. Ouvrez **PowerShell** depuis le menu Démarrer.
+4. Vérifiez Git :
+
+```powershell
+git --version
+```
+
+Le résultat doit ressembler à `git version 2.x.x`. Si PowerShell indique que `git` n’est pas reconnu, fermez puis rouvrez PowerShell. Si le problème persiste, redémarrez Windows ou contactez le support informatique.
+
+#### Linux
+
+Ouvrez **Terminal** et installez Git avec le gestionnaire de paquets de votre distribution.
+
+**Ubuntu ou Debian :**
+
+```bash
+sudo apt update
+sudo apt install git
+```
+
+**Fedora :**
+
+```bash
+sudo dnf install git
+```
+
+Vérifiez l’installation :
+
+```bash
+git --version
+```
+
+### Étape 3 — Télécharger le projet avec Git
+
+Sur la page GitHub du projet, cliquez sur le bouton vert **Code**, puis copiez l’adresse affichée sous l’onglet **HTTPS**. Elle ressemble à `https://github.com/organisation/nom-du-projet.git`.
+
+Ouvrez **PowerShell** sous Windows ou **Terminal** sous Linux et copiez la commande suivante en remplaçant l’adresse d’exemple par celle que vous venez de copier :
+
+```text
+git clone https://github.com/organisation/nom-du-projet.git
+```
+
+Appuyez sur Entrée et attendez la fin du téléchargement. Un nouveau dossier portant le nom du projet est créé. Entrez dans ce dossier avec `cd`, en remplaçant `nom-du-projet` par son nom réel :
+
+```text
+cd nom-du-projet
+```
+
+Toutes les étapes ci-dessous doivent être réalisées dans ce dossier. Si vous avez téléchargé le projet avec le bouton **Download ZIP**, cette copie ne permet pas de publier des changements : clonez le dépôt avec Git dans un nouveau dossier.
+
+### Étape 4 — Installer les prérequis Python et démarrer
+
+Le fichier `requirements.txt` contient les bibliothèques nécessaires. Les commandes suivantes créent un environnement Python propre au projet et y installent les prérequis. Cette méthode ne change pas les bibliothèques des autres applications Python. Il n’est pas nécessaire d’activer l’environnement : les commandes utilisent directement Python installé dans `.venv`.
+
+#### Windows — PowerShell
+
+```powershell
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe main.py
+```
+
+#### Linux — Terminal
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install --upgrade pip
+.venv/bin/python -m pip install -r requirements.txt
+.venv/bin/python main.py
+```
+
+La première installation peut prendre quelques minutes et nécessite une connexion Internet. Une fenêtre **Bibliothèque d’outils** doit s’ouvrir après la dernière commande.
+
+Si l’installation de PySide6 échoue sous Linux en indiquant qu’une bibliothèque système Qt ou graphique manque, installez les mises à jour proposées par votre distribution ou contactez le support informatique. Certaines installations Linux minimales ne comprennent pas l’environnement graphique nécessaire.
+
+### Relancer l’application
+
+Après l’installation initiale, il n’est pas nécessaire de réinstaller les bibliothèques. Ouvrez un terminal dans le dossier du projet et exécutez :
+
+**Windows — PowerShell :**
+
+```powershell
+.\.venv\Scripts\python.exe main.py
+```
+
+**Linux — Terminal :**
+
+```bash
+.venv/bin/python main.py
+```
+
+### Problèmes d’installation fréquents
+
+| Problème | Solution |
+|---|---|
+| `git`, `py` ou `python3` n’est pas reconnu | Vérifiez l’installation de l’outil, puis fermez et rouvrez le terminal. Sous Windows, redémarrez l’ordinateur si nécessaire. |
+| `No module named venv` ou échec de création de `.venv` sous Linux | Installez `python3-venv` sur Ubuntu/Debian, ou demandez au support informatique d’installer le module `venv` correspondant à Python. |
+| `No module named ...` au lancement | Recommencez l’étape 4 depuis le dossier du projet avec les commandes de votre système. |
+| Téléchargement ou installation des prérequis impossible | Vérifiez la connexion Internet. Un proxy ou une restriction de l’entreprise peut nécessiter l’aide du support informatique. |
+| L’application ne s’ouvre pas | Vérifiez que le terminal se trouve dans le dossier du projet cloné et contactez le support informatique avec le message affiché dans le terminal. |
 
 ## Utiliser la bibliothèque
 
@@ -106,9 +217,9 @@ Utilisez une adresse de commit appropriée à la politique de votre équipe, év
 5. Cliquez sur **Actualiser**. La liste indique les fichiers modifiés, supprimés ou non suivis et recharge les branches déjà présentes dans le clone.
 6. Cochez uniquement les fichiers qui doivent faire partie de ce changement. Vérifiez les chemins avant de continuer.
 7. Choisissez **Nouvelle branche** de préférence et indiquez un nom tel que `feature/description-outil` ou `fix/correction-export`, ou sélectionnez une branche existante affichée dans la liste. Les branches distantes connues sont indiquées comme « distante » ; la copie locale de suivi est créée automatiquement à la publication. Choisissez `main` seulement si votre équipe autorise le push direct.
-8. Écrivez un résumé clair du changement, par exemple `docs: clarifier les instructions Git`.
-9. Cliquez sur **Publier les fichiers cochés** et relisez la confirmation avant de valider.
-10. En cas de succès, le commit a été créé localement puis envoyé vers le dépôt distant.
+8. Si vous avez coché des fichiers, écrivez un résumé clair du changement, par exemple `docs: clarifier les instructions Git`. Si vous créez une branche sans publier de fichier, aucun résumé n’est nécessaire.
+9. Cliquez sur **Publier / créer une branche** et relisez la confirmation avant de valider.
+10. En cas de succès avec des fichiers cochés, le commit a été créé localement puis envoyé vers le dépôt distant. Si vous avez choisi **Nouvelle branche** sans cocher de fichier, la branche est publiée à partir du commit actuel sans créer de commit.
 
 L’application prépare uniquement les fichiers cochés. Les autres changements du dossier de travail restent non inclus. Si des fichiers étaient déjà indexés (`git add`) dans un terminal, l’opération est arrêtée afin de ne pas les inclure par erreur. Le commit est créé sur la branche sélectionnée ; une branche distante sans branche locale correspondante est d’abord créée en suivi de `origin`.
 
@@ -160,14 +271,22 @@ Pour les étapes détaillées destinées aux nouveaux utilisateurs, y compris la
 
 Exécuter la suite de tests depuis la racine du projet :
 
-```bash
-python -m unittest discover -s tests
+**Windows (PowerShell) :**
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests
 ```
 
-Sur Linux sans écran :
+**Linux :**
 
 ```bash
-QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests
+.venv/bin/python -m unittest discover -s tests
+```
+
+Sur Linux sans écran graphique :
+
+```bash
+QT_QPA_PLATFORM=offscreen .venv/bin/python -m unittest discover -s tests
 ```
 
 ## Conception et sécurité
