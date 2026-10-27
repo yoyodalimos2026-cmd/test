@@ -8,6 +8,8 @@ from openpyxl import load_workbook
 from openpyxl.styles import PatternFill
 
 
+
+
 def extract_info_from_excel_file_type_1(file_path, T1):
     try:
         df = pd.read_excel(file_path)
