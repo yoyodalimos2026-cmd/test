@@ -47,6 +47,28 @@ class GitAndEditorTests(unittest.TestCase):
         self.assertIn("Publier les fichiers cochés", warning.call_args.args[2])
         window.close()
 
+    def test_new_branch_can_be_published_without_selected_files(self) -> None:
+        window = MainWindow()
+        window.git_remote.setText("https://example.com/owner/repository.git")
+        window.git_target.addItem("Nouvelle branche", "__new_branch__")
+        window.git_target.setCurrentIndex(window.git_target.count() - 1)
+        window.git_branch.setText("feature/empty")
+        window.git_commit_message.clear()
+
+        with patch(
+            "app.main_window._show_message",
+            return_value=QMessageBox.StandardButton.Yes,
+        ) as show_message, patch.object(window.pool, "start") as start_task:
+            window._push_git_changes()
+
+        task = start_task.call_args.args[0]
+        self.assertTrue(task.branch_only)
+        self.assertEqual(task.paths, [])
+        self.assertEqual(task.target_branch, "feature/empty")
+        self.assertEqual(show_message.call_args.args[1], "Confirmer la création de branche")
+        self.assertIn("sans créer de commit", show_message.call_args.args[2])
+        window.close()
+
     def test_long_message_dialog_wraps_and_keeps_buttons_accessible(self) -> None:
         window = MainWindow()
         message = "\n".join(["Une erreur détaillée à lire."] * 100)

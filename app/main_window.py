@@ -216,6 +216,7 @@ class GitPushTask(QRunnable):
         username: str = "",
         token: str = "",
         repo_path: Path = ROOT,
+        branch_only: bool = False,
     ):
         super().__init__()
         self.remote = remote
@@ -225,15 +226,35 @@ class GitPushTask(QRunnable):
         self.username = username
         self.token = token
         self.repo_path = repo_path
+        self.branch_only = branch_only
         self.signals = GitTaskSignals()
 
     def run(self) -> None:
         try:
+            if self.branch_only and self.paths:
+                raise RuntimeError("La création d’une branche seule ne doit pas inclure de fichiers.")
+            if not self.branch_only and not self.paths:
+                raise RuntimeError("Sélectionnez des fichiers à publier.")
             if self._git("diff", "--cached", "--name-only", cwd=self.repo_path) != "":
                 raise RuntimeError(
                     "Des changements sont déjà indexés dans Git. "
                     "Validez-les ou désindexez-les avant d’utiliser le bouton de publication."
                 )
+            if self.branch_only and (
+                self._git(
+                    "show-ref", "--verify", f"refs/heads/{self.target_branch}",
+                    check=False, cwd=self.repo_path,
+                )
+                or self._git(
+                    "show-ref", "--verify", f"refs/remotes/origin/{self.target_branch}",
+                    check=False, cwd=self.repo_path,
+                )
+            ):
+                raise RuntimeError(
+                    f"La branche « {self.target_branch} » existe déjà. "
+                    "Choisissez une nouvelle branche ou sélectionnez-la dans la liste."
+                )
+
             if self._git("remote", "get-url", "origin", check=False, cwd=self.repo_path) == "":
                 self._git("remote", "add", "origin", self.remote, cwd=self.repo_path)
             else:
@@ -261,18 +282,19 @@ class GitPushTask(QRunnable):
             else:
                 self._git("switch", "-c", self.target_branch, cwd=self.repo_path)
 
-            self._git("add", "--", *self.paths, cwd=self.repo_path)
-            if self._git("diff", "--cached", "--name-only", cwd=self.repo_path):
-                try:
-                    self._git("commit", "-m", self.message, cwd=self.repo_path)
-                except RuntimeError as error:
+            if not self.branch_only:
+                self._git("add", "--", *self.paths, cwd=self.repo_path)
+                if self._git("diff", "--cached", "--name-only", cwd=self.repo_path):
                     try:
-                        self._git("reset", "--", *self.paths, cwd=self.repo_path)
-                    except RuntimeError as reset_error:
-                        raise RuntimeError(
-                            f"{error}\nLes changements n’ont pas pu être désindexés : {reset_error}"
-                        ) from error
-                    raise
+                        self._git("commit", "-m", self.message, cwd=self.repo_path)
+                    except RuntimeError as error:
+                        try:
+                            self._git("reset", "--", *self.paths, cwd=self.repo_path)
+                        except RuntimeError as reset_error:
+                            raise RuntimeError(
+                                f"{error}\nLes changements n’ont pas pu être désindexés : {reset_error}"
+                            ) from error
+                        raise
             with _askpass_environment(self.username, self.token) as auth_environment:
                 push_args = ["push", "-u", "origin", self.target_branch]
                 if self.username and self.token:
@@ -640,7 +662,7 @@ class MainWindow(QMainWindow):
         self.git_commit_message = QLineEdit()
         self.git_commit_message.setPlaceholderText("Résumé des modifications (message de commit)")
         commit_row.addWidget(self.git_commit_message, 1)
-        self.git_push_button = QPushButton("Publier les fichiers cochés")
+        self.git_push_button = QPushButton("Publier / créer une branche")
         self.git_push_button.setObjectName("primary_button")
         self.git_push_button.clicked.connect(self._push_git_changes)
         commit_row.addWidget(self.git_push_button)
@@ -650,7 +672,8 @@ class MainWindow(QMainWindow):
             "Pour HTTPS, saisissez votre nom d’utilisateur et votre jeton : ils servent uniquement à cette publication "
             "et ne sont pas conservés. GitHub exige un jeton personnel, pas le mot de passe du compte. "
             "Laissez les champs vides pour utiliser l’authentification Git déjà configurée, par exemple SSH. "
-            "Le bouton crée un commit puis pousse uniquement les fichiers cochés.",
+            "Les fichiers cochés sont commités puis publiés. Si vous choisissez « Nouvelle branche » sans cocher "
+            "de fichier, la branche est publiée à partir du commit actuel, sans créer de commit.",
             "notice",
         )
         notice.setWordWrap(True)
@@ -922,17 +945,18 @@ class MainWindow(QMainWindow):
                 QMessageBox.Icon.Warning,
             )
             return
-        if not paths:
+        target_branch = self.git_target.currentData()
+        branch_only = target_branch == "__new_branch__" and not paths
+        if not paths and not branch_only:
             _show_message(
                 self, "Aucun fichier sélectionné", "Cochez au moins un fichier à publier.",
                 QMessageBox.Icon.Warning,
             )
             return
-        if not message:
+        if paths and not message:
             _show_message(self, "Message requis", "Saisissez un résumé des modifications.", QMessageBox.Icon.Warning)
             return
 
-        target_branch = self.git_target.currentData()
         if target_branch == "__new_branch__":
             target_branch = self.git_branch.text().strip()
             if not target_branch:
@@ -949,9 +973,14 @@ class MainWindow(QMainWindow):
 
         answer = _show_message(
             self,
-            "Confirmer la publication",
-            f"Créer un commit pour {len(paths)} fichier(s) et le pousser vers « {target_branch} » ?\n\n"
-            + "\n".join(paths),
+            "Confirmer la création de branche" if branch_only else "Confirmer la publication",
+            (
+                f"Créer et publier la branche « {target_branch} » à partir de "
+                f"« {self.current_git_branch or '(branche actuelle)'} » sans créer de commit ?"
+                if branch_only
+                else f"Créer un commit pour {len(paths)} fichier(s) et le pousser vers "
+                f"« {target_branch} » ?\n\n" + "\n".join(paths)
+            ),
             QMessageBox.Icon.Question,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
@@ -963,8 +992,20 @@ class MainWindow(QMainWindow):
         self.refresh_git_button.setEnabled(False)
         self.fetch_branches_button.setEnabled(False)
         self.git_switch_button.setEnabled(False)
-        self.git_status.setText("Création du commit et publication en cours…")
-        task = GitPushTask(remote, target_branch, message, paths, username=username, token=token)
+        self.git_status.setText(
+            "Création et publication de la branche en cours…"
+            if branch_only
+            else "Création du commit et publication en cours…"
+        )
+        task = GitPushTask(
+            remote,
+            target_branch,
+            message,
+            paths,
+            username=username,
+            token=token,
+            branch_only=branch_only,
+        )
         self.git_task = task
         self.git_username.clear()
         self.git_token.clear()
@@ -973,14 +1014,22 @@ class MainWindow(QMainWindow):
         self.pool.start(task)
 
     def _git_push_finished(self) -> None:
+        task = self.git_task
         self.git_task = None
         self.git_push_button.setEnabled(True)
         self.refresh_git_button.setEnabled(True)
         self.fetch_branches_button.setEnabled(True)
-        self.git_commit_message.clear()
+        if task is None or not task.branch_only:
+            self.git_commit_message.clear()
         self._refresh_git_status()
         _show_message(
-            self, "Publication terminée", "Les fichiers sélectionnés ont été publiés.",
+            self,
+            "Branche créée" if task and task.branch_only else "Publication terminée",
+            (
+                f"La branche « {task.target_branch} » a été créée et publiée sans nouveau commit."
+                if task and task.branch_only
+                else "Les fichiers sélectionnés ont été publiés."
+            ),
             QMessageBox.Icon.Information,
         )
 

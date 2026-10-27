@@ -40,6 +40,7 @@ class GitPushTaskTests(unittest.TestCase):
         branch: str,
         paths: list[str],
         remote: Path | None = None,
+        branch_only: bool = False,
     ) -> tuple[GitPushTask, list[str], list[str]]:
         task = GitPushTask(
             str(remote or self.remote),
@@ -47,6 +48,7 @@ class GitPushTaskTests(unittest.TestCase):
             "Update selected source",
             paths,
             repo_path=self.repository,
+            branch_only=branch_only,
         )
         finished: list[str] = []
         failed: list[str] = []
@@ -106,6 +108,29 @@ class GitPushTaskTests(unittest.TestCase):
             git(self.root, "--git-dir", str(self.remote), "show", "feature/test:source.py"),
             "version = 3",
         )
+
+    def test_creates_and_pushes_new_branch_without_creating_a_commit(self) -> None:
+        initial_commit = git(self.repository, "rev-parse", "HEAD")
+
+        _, finished, failed = self._task("feature/empty", [], branch_only=True)
+
+        self.assertEqual(finished, ["done"])
+        self.assertEqual(failed, [])
+        self.assertEqual(git(self.repository, "branch", "--show-current"), "feature/empty")
+        self.assertEqual(git(self.repository, "rev-parse", "HEAD"), initial_commit)
+        self.assertEqual(
+            git(self.root, "--git-dir", str(self.remote), "rev-parse", "feature/empty"),
+            initial_commit,
+        )
+        self.assertEqual(git(self.repository, "status", "--porcelain"), "")
+
+    def test_branch_only_mode_refuses_an_existing_branch(self) -> None:
+        _, finished, failed = self._task("main", [], branch_only=True)
+
+        self.assertEqual(finished, [])
+        self.assertEqual(len(failed), 1)
+        self.assertIn("existe déjà", failed[0])
+        self.assertEqual(git(self.repository, "branch", "--show-current"), "main")
 
     def test_checks_out_and_pushes_to_existing_remote_branch(self) -> None:
         git(self.repository, "remote", "add", "origin", str(self.remote))
