@@ -35,8 +35,10 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSplitter,
     QStackedWidget,
+    QStyle,
     QTextBrowser,
     QVBoxLayout,
     QWidget,
@@ -47,6 +49,112 @@ from app.catalog import CatalogItem, related_items, scan_catalog
 
 ROOT = Path(__file__).resolve().parents[1]
 DESCRIPTIONS_FILE = ROOT / "module_descriptions.json"
+
+
+def _show_message(
+    parent: QWidget,
+    title: str,
+    text: str,
+    icon: QMessageBox.Icon,
+    buttons: QMessageBox.StandardButton = QMessageBox.StandardButton.Ok,
+    default_button: QMessageBox.StandardButton = QMessageBox.StandardButton.NoButton,
+) -> QMessageBox.StandardButton:
+    screen = parent.screen() or QApplication.primaryScreen()
+    available = screen.availableGeometry() if screen else None
+    screen_width = available.width() if available else 1024
+    screen_height = available.height() if available else 768
+    dialog_width = min(680, max(280, int(screen_width * 0.88)))
+    dialog_height = min(620, max(220, int(screen_height * 0.82)))
+    icon_width = 48
+    spacing = 16
+    margins = 40
+    text_width = max(160, dialog_width - margins - icon_width - spacing - 4)
+
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(title)
+    dialog.setModal(True)
+    dialog.setFixedWidth(dialog_width)
+
+    layout = QVBoxLayout(dialog)
+    layout.setContentsMargins(20, 18, 20, 16)
+    layout.setSpacing(16)
+
+    content = QHBoxLayout()
+    content.setSpacing(spacing)
+    icon_label = QLabel()
+    icon_pixmap = {
+        QMessageBox.Icon.Information: QStyle.StandardPixmap.SP_MessageBoxInformation,
+        QMessageBox.Icon.Warning: QStyle.StandardPixmap.SP_MessageBoxWarning,
+        QMessageBox.Icon.Critical: QStyle.StandardPixmap.SP_MessageBoxCritical,
+        QMessageBox.Icon.Question: QStyle.StandardPixmap.SP_MessageBoxQuestion,
+    }[icon]
+    icon_label.setPixmap(QApplication.style().standardIcon(icon_pixmap).pixmap(icon_width, icon_width))
+    icon_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
+    icon_label.setFixedWidth(icon_width)
+    content.addWidget(icon_label)
+
+    message_label = QLabel(text)
+    message_label.setTextFormat(Qt.TextFormat.PlainText)
+    message_label.setWordWrap(True)
+    message_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+    message_label.setFixedWidth(text_width)
+    message_label.adjustSize()
+
+    scroll_area = QScrollArea()
+    scroll_area.setWidget(message_label)
+    scroll_area.setWidgetResizable(False)
+    scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
+    scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    scroll_area.setFixedWidth(text_width + 4)
+    scroll_area.setFixedHeight(min(max(72, message_label.sizeHint().height()), dialog_height - 120))
+    content.addWidget(scroll_area, 1)
+    layout.addLayout(content)
+
+    button_box = QDialogButtonBox(
+        standardButtons=QDialogButtonBox.StandardButton(buttons.value),
+        orientation=Qt.Orientation.Horizontal,
+    )
+    for button in button_box.buttons():
+        button.setMinimumHeight(36)
+        button.setMinimumWidth(max(88, min(button.sizeHint().width(), 170)))
+    layout.addWidget(button_box)
+
+    result = QMessageBox.StandardButton.NoButton
+
+    def finish(button: QPushButton) -> None:
+        nonlocal result
+        result = QMessageBox.StandardButton(button_box.standardButton(button).value)
+        dialog.accept()
+
+    def dismiss() -> None:
+        nonlocal result
+        if button_box.button(QDialogButtonBox.StandardButton.Cancel):
+            result = QMessageBox.StandardButton.Cancel
+
+    button_box.clicked.connect(finish)
+    dialog.rejected.connect(dismiss)
+    if default_button != QMessageBox.StandardButton.NoButton:
+        default = button_box.button(QDialogButtonBox.StandardButton(default_button.value))
+        if default:
+            default.setDefault(True)
+            default.setFocus()
+
+    dialog.setStyleSheet("""
+        QDialog { background: #ffffff; color: #293831; }
+        QLabel { color: #293831; }
+        QScrollArea { background: #ffffff; }
+        QDialogButtonBox QPushButton {
+            background: #ffffff;
+            border: 1px solid #d8ded5;
+            border-radius: 4px;
+            color: #293831;
+            padding: 7px 14px;
+            font-weight: 600;
+        }
+        QDialogButtonBox QPushButton:hover { background: #edf4ef; }
+    """)
+    dialog.exec()
+    return result
 
 
 @contextmanager
@@ -605,7 +713,7 @@ class MainWindow(QMainWindow):
             }
         except RuntimeError as error:
             self.git_status.setText(f"Impossible de lire l’état Git : {error}")
-            QMessageBox.critical(self, "État Git indisponible", str(error))
+            _show_message(self, "État Git indisponible", str(error), QMessageBox.Icon.Critical)
             return
 
         self.current_git_branch = branch
@@ -638,28 +746,31 @@ class MainWindow(QMainWindow):
         username = self.git_username.text()
         token = self.git_token.text()
         if not remote:
-            QMessageBox.warning(self, "Dépôt distant requis", "Saisissez l’URL du dépôt distant.")
+            _show_message(self, "Dépôt distant requis", "Saisissez l’URL du dépôt distant.", QMessageBox.Icon.Warning)
             return
         if "://" in remote and "@" in remote.partition("://")[2].partition("/")[0]:
-            QMessageBox.warning(
+            _show_message(
                 self,
                 "Identifiants dans l’URL",
                 "Ne placez pas de mot de passe ou de jeton dans l’URL. Utilisez les champs d’identification.",
+                QMessageBox.Icon.Warning,
             )
             return
         if bool(username) != bool(token):
-            QMessageBox.warning(
+            _show_message(
                 self,
                 "Identifiants incomplets",
                 "Renseignez à la fois le nom d’utilisateur et le jeton, ou laissez les deux champs vides.",
+                QMessageBox.Icon.Warning,
             )
             return
         if username and not remote.lower().startswith("https://"):
-            QMessageBox.warning(
+            _show_message(
                 self,
                 "Authentification HTTPS requise",
                 "Les identifiants saisis dans cette rubrique sont utilisables avec une URL HTTPS. "
                 "Pour une URL SSH, laissez ces champs vides et utilisez la clé SSH configurée dans Git.",
+                QMessageBox.Icon.Warning,
             )
             return
 
@@ -682,10 +793,11 @@ class MainWindow(QMainWindow):
         self.refresh_git_button.setEnabled(True)
         self.git_push_button.setEnabled(True)
         self._refresh_git_status()
-        QMessageBox.information(
+        _show_message(
             self,
             "Branches actualisées",
             "Les branches du dépôt distant ont été récupérées. Elles sont maintenant disponibles dans la liste.",
+            QMessageBox.Icon.Information,
         )
 
     def _git_fetch_failed(self, error: str) -> None:
@@ -695,23 +807,25 @@ class MainWindow(QMainWindow):
         self.git_push_button.setEnabled(True)
         self._refresh_git_status()
         self.git_status.setText(f"Échec de la récupération des branches : {error}")
-        QMessageBox.critical(self, "Récupération impossible", error)
+        _show_message(self, "Récupération impossible", error, QMessageBox.Icon.Critical)
 
     def _switch_git_branch(self) -> None:
         branch = self.git_target.currentData()
         if not branch or branch == "__new_branch__":
-            QMessageBox.warning(
-                self, "Branche à sélectionner", "Choisissez une branche existante dans la liste."
+            _show_message(
+                self, "Branche à sélectionner", "Choisissez une branche existante dans la liste.",
+                QMessageBox.Icon.Warning,
             )
             return
         if branch == self.current_git_branch:
             return
 
-        answer = QMessageBox.question(
+        answer = _show_message(
             self,
             "Changer de branche",
             f"Basculer de « {self.current_git_branch or '(détachée)'} » vers « {branch} » ?\n\n"
             "Les changements non publiés empêchent cette opération.",
+            QMessageBox.Icon.Question,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
@@ -736,8 +850,9 @@ class MainWindow(QMainWindow):
         self.git_push_button.setEnabled(True)
         self.fetch_branches_button.setEnabled(True)
         self._refresh_git_status()
-        QMessageBox.information(
-            self, "Branche modifiée", f"Vous êtes maintenant sur « {self.current_git_branch} »."
+        _show_message(
+            self, "Branche modifiée", f"Vous êtes maintenant sur « {self.current_git_branch} ».",
+            QMessageBox.Icon.Information,
         )
 
     def _git_branch_switch_failed(self, error: str) -> None:
@@ -763,7 +878,7 @@ class MainWindow(QMainWindow):
             self.git_files.setFocus()
         else:
             message = error
-        QMessageBox.warning(self, "Changement de branche impossible", message)
+        _show_message(self, "Changement de branche impossible", message, QMessageBox.Icon.Warning)
 
     def _push_git_changes(self) -> None:
         remote = self.git_remote.text().strip()
@@ -776,55 +891,68 @@ class MainWindow(QMainWindow):
             if self.git_files.item(index).checkState() == Qt.CheckState.Checked
         ]
         if not remote:
-            QMessageBox.warning(self, "Dépôt distant requis", "Saisissez l’URL HTTPS ou SSH du dépôt.")
+            _show_message(
+                self, "Dépôt distant requis", "Saisissez l’URL HTTPS ou SSH du dépôt.",
+                QMessageBox.Icon.Warning,
+            )
             return
         if "://" in remote and "@" in remote.partition("://")[2].partition("/")[0]:
-            QMessageBox.warning(
+            _show_message(
                 self,
                 "Identifiants dans l’URL",
                 "Ne placez pas de mot de passe ou de jeton dans l’URL. "
                 "Utilisez Git Credential Manager ou une clé SSH.",
+                QMessageBox.Icon.Warning,
             )
             return
         if bool(username) != bool(token):
-            QMessageBox.warning(
+            _show_message(
                 self,
                 "Identifiants incomplets",
                 "Renseignez à la fois le nom d’utilisateur et le jeton, ou laissez les deux champs vides.",
+                QMessageBox.Icon.Warning,
             )
             return
         if username and not remote.lower().startswith("https://"):
-            QMessageBox.warning(
+            _show_message(
                 self,
                 "Authentification HTTPS requise",
                 "Les identifiants saisis dans cette rubrique sont utilisables avec une URL HTTPS. "
                 "Pour une URL SSH, laissez les champs vides et utilisez la clé SSH configurée dans Git.",
+                QMessageBox.Icon.Warning,
             )
             return
         if not paths:
-            QMessageBox.warning(self, "Aucun fichier sélectionné", "Cochez au moins un fichier à publier.")
+            _show_message(
+                self, "Aucun fichier sélectionné", "Cochez au moins un fichier à publier.",
+                QMessageBox.Icon.Warning,
+            )
             return
         if not message:
-            QMessageBox.warning(self, "Message requis", "Saisissez un résumé des modifications.")
+            _show_message(self, "Message requis", "Saisissez un résumé des modifications.", QMessageBox.Icon.Warning)
             return
 
         target_branch = self.git_target.currentData()
         if target_branch == "__new_branch__":
             target_branch = self.git_branch.text().strip()
             if not target_branch:
-                QMessageBox.warning(self, "Nom de branche requis", "Saisissez le nom de la nouvelle branche.")
+                _show_message(
+                    self, "Nom de branche requis", "Saisissez le nom de la nouvelle branche.",
+                    QMessageBox.Icon.Warning,
+                )
                 return
             try:
                 self._git("check-ref-format", "--branch", target_branch)
             except RuntimeError as error:
-                QMessageBox.warning(self, "Nom de branche invalide", str(error))
+                _show_message(self, "Nom de branche invalide", str(error), QMessageBox.Icon.Warning)
                 return
 
-        answer = QMessageBox.question(
+        answer = _show_message(
             self,
             "Confirmer la publication",
             f"Créer un commit pour {len(paths)} fichier(s) et le pousser vers « {target_branch} » ?\n\n"
             + "\n".join(paths),
+            QMessageBox.Icon.Question,
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Cancel,
         )
@@ -851,7 +979,10 @@ class MainWindow(QMainWindow):
         self.fetch_branches_button.setEnabled(True)
         self.git_commit_message.clear()
         self._refresh_git_status()
-        QMessageBox.information(self, "Publication terminée", "Les fichiers sélectionnés ont été publiés.")
+        _show_message(
+            self, "Publication terminée", "Les fichiers sélectionnés ont été publiés.",
+            QMessageBox.Icon.Information,
+        )
 
     def _git_push_failed(self, error: str) -> None:
         self.git_task = None
@@ -859,7 +990,7 @@ class MainWindow(QMainWindow):
         self.refresh_git_button.setEnabled(True)
         self.fetch_branches_button.setEnabled(True)
         self.git_status.setText(f"Échec de la publication : {error}")
-        QMessageBox.critical(self, "Publication Git impossible", error)
+        _show_message(self, "Publication Git impossible", error, QMessageBox.Icon.Critical)
 
     def _build_roadmap_page(self) -> QWidget:
         page, layout = self._page()
@@ -1041,7 +1172,12 @@ class MainWindow(QMainWindow):
                 else:
                     raise UnicodeError("Le fichier n’est ni en UTF-8 ni en Windows-1252.")
         except (OSError, SyntaxError, UnicodeError) as error:
-            QMessageBox.critical(self, "Ouverture impossible", f"Impossible de lire le fichier source :\n{error}")
+            _show_message(
+                self,
+                "Ouverture impossible",
+                f"Impossible de lire le fichier source :\n{error}",
+                QMessageBox.Icon.Critical,
+            )
             return
 
         newline = "\r\n" if b"\r\n" in raw else "\n"
@@ -1066,8 +1202,10 @@ class MainWindow(QMainWindow):
                 with path.open("w", encoding=encoding, newline="") as source:
                     source.write(editor.toPlainText().replace("\n", newline))
             except (OSError, UnicodeError) as error:
-                QMessageBox.critical(
-                    dialog, "Enregistrement impossible", f"Impossible d’enregistrer le fichier :\n{error}"
+                _show_message(
+                    dialog, "Enregistrement impossible",
+                    f"Impossible d’enregistrer le fichier :\n{error}",
+                    QMessageBox.Icon.Critical,
                 )
                 return
             dialog.accept()
@@ -1100,9 +1238,10 @@ class MainWindow(QMainWindow):
         )
         self.python_process = None
         if exit_code != 0:
-            QMessageBox.warning(
+            _show_message(
                 self, "Échec du script Python",
-                f"Le script s’est terminé avec le code {exit_code}. Consultez la fenêtre ou le terminal du script s’il en ouvre un."
+                f"Le script s’est terminé avec le code {exit_code}. Consultez la fenêtre ou le terminal du script s’il en ouvre un.",
+                QMessageBox.Icon.Warning,
             )
         if self.current_item and self.current_item.kind == "Python":
             self.launch_button.setEnabled(True)

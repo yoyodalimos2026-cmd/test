@@ -8,11 +8,14 @@ from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QDialogButtonBox,
+    QLabel,
+    QMessageBox,
     QPlainTextEdit,
+    QScrollArea,
     QTextBrowser,
 )
 
-from app.main_window import MainWindow
+from app.main_window import MainWindow, _show_message
 
 
 class GitAndEditorTests(unittest.TestCase):
@@ -34,7 +37,7 @@ class GitAndEditorTests(unittest.TestCase):
         window.git_switch_task = object()
 
         with patch.object(window, "_refresh_git_status"), patch(
-            "app.main_window.QMessageBox.warning"
+            "app.main_window._show_message"
         ) as warning:
             window._git_branch_switch_failed(
                 "Le dossier contient des modifications non publiées."
@@ -42,6 +45,87 @@ class GitAndEditorTests(unittest.TestCase):
 
         self.assertIn("Cochez les fichiers", warning.call_args.args[2])
         self.assertIn("Publier les fichiers cochés", warning.call_args.args[2])
+        window.close()
+
+    def test_long_message_dialog_wraps_and_keeps_buttons_accessible(self) -> None:
+        window = MainWindow()
+        message = "\n".join(["Une erreur détaillée à lire."] * 100)
+        inspected: dict[str, object] = {}
+
+        def inspect_dialog(dialog: QDialog) -> int:
+            dialog.show()
+            self.application.processEvents()
+            label = next(
+                label for label in dialog.findChildren(QLabel) if label.text() == message
+            )
+            scroll_area = dialog.findChild(QScrollArea)
+            button_box = dialog.findChild(QDialogButtonBox)
+            inspected["label"] = label
+            inspected["scroll_area"] = scroll_area
+            inspected["button_box"] = button_box
+            button_box.button(QDialogButtonBox.StandardButton.Ok).click()
+            return int(QDialog.DialogCode.Accepted)
+
+        with patch.object(QDialog, "exec", inspect_dialog):
+            answer = _show_message(
+                window,
+                "Erreur détaillée",
+                message,
+                QMessageBox.Icon.Critical,
+            )
+
+        label = inspected["label"]
+        scroll_area = inspected["scroll_area"]
+        button_box = inspected["button_box"]
+        self.assertEqual(answer, QMessageBox.StandardButton.Ok)
+        self.assertEqual(label.text(), message)
+        self.assertTrue(label.wordWrap())
+        self.assertGreater(scroll_area.verticalScrollBar().maximum(), 0)
+        self.assertGreaterEqual(
+            button_box.button(QDialogButtonBox.StandardButton.Ok).height(),
+            36,
+        )
+        window.close()
+
+    def test_message_dialog_returns_selected_confirmation_button(self) -> None:
+        window = MainWindow()
+
+        for selected_button in (
+            QMessageBox.StandardButton.Yes,
+            QMessageBox.StandardButton.Cancel,
+        ):
+            def select_button(dialog: QDialog) -> int:
+                button_box = dialog.findChild(QDialogButtonBox)
+                standard_button = QDialogButtonBox.StandardButton(selected_button.value)
+                self.assertIsNotNone(button_box.button(standard_button))
+                button_box.button(standard_button).click()
+                return int(QDialog.DialogCode.Accepted)
+
+            with patch.object(QDialog, "exec", select_button):
+                answer = _show_message(
+                    window,
+                    "Confirmer",
+                    "Continuer ?",
+                    QMessageBox.Icon.Question,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                    QMessageBox.StandardButton.Cancel,
+                )
+            self.assertEqual(answer, selected_button)
+
+        def reject_dialog(dialog: QDialog) -> int:
+            dialog.reject()
+            return int(QDialog.DialogCode.Rejected)
+
+        with patch.object(QDialog, "exec", reject_dialog):
+            answer = _show_message(
+                window,
+                "Confirmer",
+                "Continuer ?",
+                QMessageBox.Icon.Question,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+        self.assertEqual(answer, QMessageBox.StandardButton.Cancel)
         window.close()
 
     def test_branch_targets_include_local_and_remote_branches(self) -> None:
