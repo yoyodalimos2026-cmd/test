@@ -12,6 +12,7 @@ L’application aide une équipe à explorer des modules VBA et des scripts Pyth
 - Afficher une fiche d’outil avec une description indicative, des procédures reconnues et des fichiers associés.
 - Ouvrir une source dans un éditeur intégré, puis l’enregistrer.
 - Afficher l’état Git du dépôt, ses fichiers modifiés et les fichiers non suivis.
+- Permettre le changement immédiat de branche depuis l’interface et recharger le catalogue sans redémarrer l’application.
 - Laisser l’utilisateur choisir les fichiers à inclure, le message de commit et une branche locale/distante, ou créer une branche.
 - Créer un commit local et tenter de le pousser vers `origin`.
 - Permettre l’authentification HTTPS par identifiant et jeton à usage ponctuel, ou réutiliser la configuration SSH/Git existante.
@@ -39,6 +40,10 @@ Git est une dépendance système et ne figure pas comme bibliothèque Python dan
 
 `GitPushTask`, un `QRunnable`, réalise les commandes Git dans un worker Qt pour ne pas bloquer l’interface. Les arguments sont transmis à `subprocess.run` sous forme de liste, sans interprétation par un shell. Le worker émet un signal de succès ou d’échec consommé par la fenêtre.
 
+`GitBranchSwitchTask` réalise séparément le changement de branche. Il refuse le basculement si l’arbre de travail contient des modifications suivies ou non suivies. Après succès, la fenêtre recharge le catalogue de sources et le statut Git ; il n’est pas nécessaire de redémarrer l’application.
+
+`GitFetchTask` récupère les références distantes (`git fetch --prune origin`) en tâche de fond. Il configure `origin` depuis l’URL saisie, utilise au besoin le même mécanisme temporaire d’authentification HTTPS, puis actualise la liste des branches. Il ne modifie pas les fichiers de travail ni la branche active.
+
 Les commandes principales sont :
 
 1. vérifier l’absence de changements déjà indexés par l’utilisateur ;
@@ -55,7 +60,7 @@ Les erreurs de Git sont affichées dans la fenêtre. Une erreur après le commit
 1. Le dépôt de travail est obtenu avec `git clone`. Une archive ZIP ne contient pas les métadonnées `.git` requises.
 2. Le contributeur configure `user.name` et `user.email` dans la configuration locale du dépôt s’ils ne sont pas déjà définis. Ces valeurs identifient l’auteur du commit.
 3. Il modifie et enregistre un fichier source depuis la bibliothèque.
-4. Il actualise l’état Git, coche les fichiers voulus et choisit une branche locale ou distante, ou en crée une nouvelle, puis saisit un résumé.
+4. Au besoin, il récupère les dernières branches distantes avec le bouton prévu. Il actualise ensuite l’état, coche les fichiers voulus et choisit une branche locale ou distante, ou en crée une nouvelle, puis saisit un résumé.
 5. Il confirme les chemins montrés dans la boîte de confirmation.
 6. Le worker crée le commit et le pousse ; l’interface indique le résultat.
 7. Pour une nouvelle branche, le contributeur ouvre ensuite une Pull request sur la plateforme d’hébergement.
@@ -67,7 +72,7 @@ Les erreurs de Git sont affichées dans la fenêtre. Une erreur après le commit
 L’utilisateur peut entrer un nom d’utilisateur et un jeton. Les deux champs doivent être remplis ensemble. Si ces identifiants ponctuels sont présents :
 
 - l’interface masque le jeton ;
-- elle efface les champs au démarrage de la publication ;
+- elle efface les champs au démarrage du fetch ou du push ;
 - le worker passe les valeurs à un helper `GIT_ASKPASS`, et non aux arguments de commande ou à l’URL du remote ;
 - la valeur du secret est conservée dans un fichier temporaire à accès restreint pendant l’opération, puis nettoyée par le gestionnaire de répertoire temporaire ;
 - l’appel du push neutralise les `credential.helper` configurés afin que des identifiants précédemment mémorisés ne remplacent pas le compte explicitement saisi ;
@@ -93,9 +98,11 @@ Si les champs sont vides, aucune variable `GIT_ASKPASS` temporaire n’est défi
 - L’utilisateur doit relire les sources et les chemins avant le commit ; une confirmation de publication liste les fichiers sélectionnés.
 - Ne jamais inclure un jeton dans une URL, une source, une note libre ou un commit.
 - L’authentification n’octroie pas de permission à un utilisateur qui n’en a pas déjà sur le dépôt.
-- Les branches distantes proposées correspondent aux références `origin/*` déjà présentes dans le clone ; l’actualisation de la page ne fait pas de `fetch`. Une branche locale de suivi est créée depuis cette référence avant le commit si besoin.
+- Les branches distantes proposées correspondent aux références `origin/*` présentes dans le clone. Le bouton **Actualiser** ne fait pas de `fetch`. Une branche locale de suivi est créée depuis cette référence avant le commit si besoin.
+- Le bouton **Récupérer les branches distantes** effectue explicitement un `fetch --prune` ; le simple bouton **Actualiser** n’interroge que l’état local. Une branche locale de suivi est créée depuis une référence distante avant le commit ou le changement de branche si besoin.
+- Le changement de branche depuis l’interface refuse le changement si l’arbre de travail n’est pas propre.
 - Les politiques du serveur peuvent refuser un push direct vers `main` ou vers une autre branche protégée.
-- Le flux ne fait pas de `fetch`, `pull`, rebase ou résolution de conflits. Il n’effectue pas automatiquement de synchronisation avec les changements distants.
+- Le flux ne fait pas automatiquement de `pull`, rebase ou résolution de conflits. Le `fetch` n’est déclenché que par le bouton **Récupérer les branches distantes** ; il ne synchronise pas le contenu des fichiers ni la branche de travail.
 - Un commit est créé localement avant le push. Si le push échoue, le commit demeure local ; l’utilisateur doit suivre le guide de reprise plutôt que répéter aveuglément la publication ou forcer un push.
 - Si des changements sont déjà dans l’index Git, le worker arrête le flux pour éviter d’en mélanger le contenu avec les fichiers cochés.
 - Un processus interrompu de force pendant une publication peut empêcher le nettoyage normal de données temporaires par le système d’exploitation ; le jeton doit donc rester à durée limitée et être révoqué s’il a pu être exposé.

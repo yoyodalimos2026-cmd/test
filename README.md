@@ -103,7 +103,7 @@ Utilisez une adresse de commit appropriée à la politique de votre équipe, év
 2. Modifiez le texte et cliquez sur **Enregistrer**. **Annuler** abandonne les modifications non enregistrées.
 3. Ouvrez la page **Gestion Git** et vérifiez l’URL HTTPS du dépôt distant. L’URL doit correspondre au dépôt cloné et au compte ou à l’organisation qui le possède. Le remote utilisé est `origin`.
 4. Pour une URL HTTPS, saisissez votre nom d’utilisateur et un jeton dans les champs d’identification. Pour une URL SSH, laissez ces champs vides et configurez votre clé SSH dans Git.
-5. Cliquez sur **Actualiser**. La liste indique les fichiers modifiés, supprimés ou non suivis.
+5. Cliquez sur **Actualiser**. La liste indique les fichiers modifiés, supprimés ou non suivis et recharge les branches déjà présentes dans le clone.
 6. Cochez uniquement les fichiers qui doivent faire partie de ce changement. Vérifiez les chemins avant de continuer.
 7. Choisissez **Nouvelle branche** de préférence et indiquez un nom tel que `feature/description-outil` ou `fix/correction-export`, ou sélectionnez une branche existante affichée dans la liste. Les branches distantes connues sont indiquées comme « distante » ; la copie locale de suivi est créée automatiquement à la publication. Choisissez `main` seulement si votre équipe autorise le push direct.
 8. Écrivez un résumé clair du changement, par exemple `docs: clarifier les instructions Git`.
@@ -113,6 +113,12 @@ Utilisez une adresse de commit appropriée à la politique de votre équipe, év
 L’application prépare uniquement les fichiers cochés. Les autres changements du dossier de travail restent non inclus. Si des fichiers étaient déjà indexés (`git add`) dans un terminal, l’opération est arrêtée afin de ne pas les inclure par erreur. Le commit est créé sur la branche sélectionnée ; une branche distante sans branche locale correspondante est d’abord créée en suivi de `origin`.
 
 Pour proposer un changement sur une nouvelle branche, ouvrez ensuite GitHub, comparez cette branche à `main` et créez une **Pull request** pour demander une revue. Les organisations peuvent exiger une Pull request et interdire les pushes directs sur `main`.
+
+### Changer de branche sans fermer l’application
+
+Dans **Gestion Git**, choisissez une branche existante dans la liste puis cliquez sur **Basculer vers cette branche**. L’application met à jour la branche active et recharge la bibliothèque sans redémarrage. Les modifications non publiées (y compris les fichiers non suivis) bloquent le basculement pour éviter toute perte : publiez-les ou traitez-les avant de changer.
+
+Les branches distantes affichées sont celles que le clone connaît déjà. Cliquez sur **Récupérer les branches distantes** pour télécharger les dernières références depuis `origin` directement dans l’application ; si le dépôt est privé, saisissez l’identifiant HTTPS et le jeton avant de cliquer. **Actualiser** relit ensuite l’état local sans contacter le serveur.
 
 ### Nom d’utilisateur, mot de passe et jeton GitHub
 

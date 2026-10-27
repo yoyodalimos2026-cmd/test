@@ -49,6 +49,50 @@ ROOT = Path(__file__).resolve().parents[1]
 DESCRIPTIONS_FILE = ROOT / "module_descriptions.json"
 
 
+@contextmanager
+def _askpass_environment(username: str, token: str) -> Generator[dict[str, str], None, None]:
+    if not username and not token:
+        yield {}
+        return
+
+    with tempfile.TemporaryDirectory(prefix="git-askpass-") as directory:
+        temporary_directory = Path(directory)
+        credentials_path = temporary_directory / "credentials.json"
+        credentials_path.write_text(
+            json.dumps({"username": username, "token": token}),
+            encoding="utf-8",
+        )
+        credentials_path.chmod(0o600)
+
+        helper_path = temporary_directory / "askpass.py"
+        helper_path.write_text(
+            "import json, os, sys\n"
+            "with open(os.environ['GIT_GUI_CREDENTIALS_FILE'], encoding='utf-8') as source:\n"
+            "    credentials = json.load(source)\n"
+            "prompt = sys.argv[1].casefold() if len(sys.argv) > 1 else ''\n"
+            "key = 'token' if 'password' in prompt or 'token' in prompt else 'username'\n"
+            "print(credentials[key])\n",
+            encoding="utf-8",
+        )
+        askpass_path = temporary_directory / ("askpass.cmd" if os.name == "nt" else "askpass")
+        if os.name == "nt":
+            askpass_path.write_text(
+                f'@"{sys.executable}" "{helper_path}" %*\r\n',
+                encoding="utf-8",
+            )
+        else:
+            askpass_path.write_text(
+                f"#!/bin/sh\nexec {shlex.quote(sys.executable)} "
+                f"{shlex.quote(str(helper_path))} \"$@\"\n",
+                encoding="utf-8",
+            )
+            askpass_path.chmod(0o700)
+        yield {
+            "GIT_ASKPASS": str(askpass_path),
+            "GIT_GUI_CREDENTIALS_FILE": str(credentials_path),
+        }
+
+
 class GitTaskSignals(QObject):
     finished = Signal()
     failed = Signal(str)
@@ -121,7 +165,7 @@ class GitPushTask(QRunnable):
                             f"{error}\nLes changements n’ont pas pu être désindexés : {reset_error}"
                         ) from error
                     raise
-            with self._askpass_environment() as auth_environment:
+            with _askpass_environment(self.username, self.token) as auth_environment:
                 push_args = ["push", "-u", "origin", self.target_branch]
                 if self.username and self.token:
                     push_args = ["-c", "credential.helper=", *push_args]
@@ -140,49 +184,6 @@ class GitPushTask(QRunnable):
         finally:
             self.username = ""
             self.token = ""
-
-    @contextmanager
-    def _askpass_environment(self) -> Generator[dict[str, str], None, None]:
-        if not self.username and not self.token:
-            yield {}
-            return
-
-        with tempfile.TemporaryDirectory(prefix="git-askpass-") as directory:
-            temporary_directory = Path(directory)
-            credentials_path = temporary_directory / "credentials.json"
-            credentials_path.write_text(
-                json.dumps({"username": self.username, "token": self.token}),
-                encoding="utf-8",
-            )
-            credentials_path.chmod(0o600)
-
-            helper_path = temporary_directory / "askpass.py"
-            helper_path.write_text(
-                "import json, os, sys\n"
-                "with open(os.environ['GIT_GUI_CREDENTIALS_FILE'], encoding='utf-8') as source:\n"
-                "    credentials = json.load(source)\n"
-                "prompt = sys.argv[1].casefold() if len(sys.argv) > 1 else ''\n"
-                "key = 'token' if 'password' in prompt or 'token' in prompt else 'username'\n"
-                "print(credentials[key])\n",
-                encoding="utf-8",
-            )
-            askpass_path = temporary_directory / ("askpass.cmd" if os.name == "nt" else "askpass")
-            if os.name == "nt":
-                askpass_path.write_text(
-                    f'@"{sys.executable}" "{helper_path}" %*\r\n',
-                    encoding="utf-8",
-                )
-            else:
-                askpass_path.write_text(
-                    f"#!/bin/sh\nexec {shlex.quote(sys.executable)} "
-                    f"{shlex.quote(str(helper_path))} \"$@\"\n",
-                    encoding="utf-8",
-                )
-                askpass_path.chmod(0o700)
-            yield {
-                "GIT_ASKPASS": str(askpass_path),
-                "GIT_GUI_CREDENTIALS_FILE": str(credentials_path),
-            }
 
     @staticmethod
     def _git(
@@ -210,6 +211,93 @@ class GitPushTask(QRunnable):
         return result.stdout
 
 
+class GitBranchSwitchTask(QRunnable):
+    def __init__(self, branch: str, repo_path: Path = ROOT):
+        super().__init__()
+        self.branch = branch
+        self.repo_path = repo_path
+        self.signals = GitTaskSignals()
+
+    def run(self) -> None:
+        try:
+            status = GitPushTask._git(
+                "status", "--porcelain=v1", "--untracked-files=all", cwd=self.repo_path
+            )
+            if status:
+                raise RuntimeError(
+                    "Le dossier contient des modifications non publiées. "
+                    "Enregistrez-les ou publiez-les avant de changer de branche."
+                )
+
+            if GitPushTask._git(
+                "show-ref", "--verify", f"refs/heads/{self.branch}", check=False, cwd=self.repo_path
+            ):
+                GitPushTask._git("switch", self.branch, cwd=self.repo_path)
+            elif GitPushTask._git(
+                "show-ref",
+                "--verify",
+                f"refs/remotes/origin/{self.branch}",
+                check=False,
+                cwd=self.repo_path,
+            ):
+                GitPushTask._git(
+                    "switch",
+                    "--track",
+                    "-c",
+                    self.branch,
+                    f"origin/{self.branch}",
+                    cwd=self.repo_path,
+                )
+            else:
+                raise RuntimeError(f"La branche « {self.branch} » n’existe plus dans ce clone.")
+            self.signals.finished.emit()
+        except Exception as error:
+            self.signals.failed.emit(str(error))
+
+
+class GitFetchTask(QRunnable):
+    def __init__(
+        self,
+        remote: str,
+        username: str = "",
+        token: str = "",
+        repo_path: Path = ROOT,
+    ):
+        super().__init__()
+        self.remote = remote
+        self.username = username
+        self.token = token
+        self.repo_path = repo_path
+        self.signals = GitTaskSignals()
+
+    def run(self) -> None:
+        try:
+            if GitPushTask._git("remote", "get-url", "origin", check=False, cwd=self.repo_path):
+                GitPushTask._git("remote", "set-url", "origin", self.remote, cwd=self.repo_path)
+            else:
+                GitPushTask._git("remote", "add", "origin", self.remote, cwd=self.repo_path)
+
+            with _askpass_environment(self.username, self.token) as auth_environment:
+                fetch_args = ["fetch", "--prune", "origin"]
+                if self.username and self.token:
+                    fetch_args = ["-c", "credential.helper=", *fetch_args]
+                GitPushTask._git(
+                    *fetch_args,
+                    cwd=self.repo_path,
+                    extra_env=auth_environment,
+                )
+            self.signals.finished.emit()
+        except Exception as error:
+            message = str(error)
+            for secret in (self.username, self.token):
+                if secret:
+                    message = message.replace(secret, "[masqué]")
+            self.signals.failed.emit(message)
+        finally:
+            self.username = ""
+            self.token = ""
+
+
 def _label(text: str, style: str = "") -> QLabel:
     widget = QLabel(text)
     if style:
@@ -227,6 +315,9 @@ class MainWindow(QMainWindow):
         self.current_item: CatalogItem | None = None
         self.python_process: QProcess | None = None
         self.git_task: GitPushTask | None = None
+        self.git_switch_task: GitBranchSwitchTask | None = None
+        self.git_fetch_task: GitFetchTask | None = None
+        self.current_git_branch = ""
         self.descriptions = self._read_descriptions()
         self.pool = QThreadPool.globalInstance()
         self._build_ui()
@@ -402,6 +493,9 @@ class MainWindow(QMainWindow):
         self.refresh_git_button = QPushButton("Actualiser")
         self.refresh_git_button.clicked.connect(self._refresh_git_status)
         remote_row.addWidget(self.refresh_git_button)
+        self.fetch_branches_button = QPushButton("Récupérer les branches distantes")
+        self.fetch_branches_button.clicked.connect(self._fetch_git_branches)
+        remote_row.addWidget(self.fetch_branches_button)
         layout.addLayout(remote_row)
 
         credentials_row = QHBoxLayout()
@@ -429,6 +523,9 @@ class MainWindow(QMainWindow):
         self.git_branch = QLineEdit("feature/ma-modification")
         self.git_branch.setPlaceholderText("Nom de la nouvelle branche")
         target_row.addWidget(self.git_branch, 1)
+        self.git_switch_button = QPushButton("Basculer vers cette branche")
+        self.git_switch_button.clicked.connect(self._switch_git_branch)
+        target_row.addWidget(self.git_switch_button)
         layout.addLayout(target_row)
 
         commit_row = QHBoxLayout()
@@ -454,7 +551,23 @@ class MainWindow(QMainWindow):
         return page
 
     def _update_branch_field(self, _index: int) -> None:
-        self.git_branch.setEnabled(self.git_target.currentData() == "__new_branch__")
+        target = self.git_target.currentData()
+        is_new_branch = target == "__new_branch__"
+        self.git_branch.setEnabled(is_new_branch)
+        if hasattr(self, "git_switch_button"):
+            self.git_switch_button.setEnabled(
+                not is_new_branch
+                and target != self.current_git_branch
+                and self.git_switch_task is None
+                and self.git_fetch_task is None
+                and self.git_task is None
+            )
+        if hasattr(self, "fetch_branches_button"):
+            self.fetch_branches_button.setEnabled(
+                self.git_fetch_task is None
+                and self.git_switch_task is None
+                and self.git_task is None
+            )
 
     def _refresh_branch_targets(self, local_branches: set[str], remote_branches: set[str]) -> None:
         selected_target = self.git_target.currentData()
@@ -495,6 +608,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "État Git indisponible", str(error))
             return
 
+        self.current_git_branch = branch
         self._refresh_branch_targets(local_branches, remote_branches)
         self.git_files.clear()
         index = 0
@@ -518,6 +632,138 @@ class MainWindow(QMainWindow):
         if changed_count == 0:
             summary += " · aucun changement à publier"
         self.git_status.setText(summary)
+
+    def _fetch_git_branches(self) -> None:
+        remote = self.git_remote.text().strip()
+        username = self.git_username.text()
+        token = self.git_token.text()
+        if not remote:
+            QMessageBox.warning(self, "Dépôt distant requis", "Saisissez l’URL du dépôt distant.")
+            return
+        if "://" in remote and "@" in remote.partition("://")[2].partition("/")[0]:
+            QMessageBox.warning(
+                self,
+                "Identifiants dans l’URL",
+                "Ne placez pas de mot de passe ou de jeton dans l’URL. Utilisez les champs d’identification.",
+            )
+            return
+        if bool(username) != bool(token):
+            QMessageBox.warning(
+                self,
+                "Identifiants incomplets",
+                "Renseignez à la fois le nom d’utilisateur et le jeton, ou laissez les deux champs vides.",
+            )
+            return
+        if username and not remote.lower().startswith("https://"):
+            QMessageBox.warning(
+                self,
+                "Authentification HTTPS requise",
+                "Les identifiants saisis dans cette rubrique sont utilisables avec une URL HTTPS. "
+                "Pour une URL SSH, laissez ces champs vides et utilisez la clé SSH configurée dans Git.",
+            )
+            return
+
+        self.fetch_branches_button.setEnabled(False)
+        self.refresh_git_button.setEnabled(False)
+        self.git_push_button.setEnabled(False)
+        self.git_switch_button.setEnabled(False)
+        self.git_status.setText("Récupération des branches depuis origin…")
+        task = GitFetchTask(remote, username=username, token=token)
+        self.git_fetch_task = task
+        self.git_username.clear()
+        self.git_token.clear()
+        task.signals.finished.connect(self._git_fetch_finished)
+        task.signals.failed.connect(self._git_fetch_failed)
+        self.pool.start(task)
+
+    def _git_fetch_finished(self) -> None:
+        self.git_fetch_task = None
+        self.fetch_branches_button.setEnabled(True)
+        self.refresh_git_button.setEnabled(True)
+        self.git_push_button.setEnabled(True)
+        self._refresh_git_status()
+        QMessageBox.information(
+            self,
+            "Branches actualisées",
+            "Les branches du dépôt distant ont été récupérées. Elles sont maintenant disponibles dans la liste.",
+        )
+
+    def _git_fetch_failed(self, error: str) -> None:
+        self.git_fetch_task = None
+        self.fetch_branches_button.setEnabled(True)
+        self.refresh_git_button.setEnabled(True)
+        self.git_push_button.setEnabled(True)
+        self._refresh_git_status()
+        self.git_status.setText(f"Échec de la récupération des branches : {error}")
+        QMessageBox.critical(self, "Récupération impossible", error)
+
+    def _switch_git_branch(self) -> None:
+        branch = self.git_target.currentData()
+        if not branch or branch == "__new_branch__":
+            QMessageBox.warning(
+                self, "Branche à sélectionner", "Choisissez une branche existante dans la liste."
+            )
+            return
+        if branch == self.current_git_branch:
+            return
+
+        answer = QMessageBox.question(
+            self,
+            "Changer de branche",
+            f"Basculer de « {self.current_git_branch or '(détachée)'} » vers « {branch} » ?\n\n"
+            "Les changements non publiés empêchent cette opération.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        self.git_switch_button.setEnabled(False)
+        self.fetch_branches_button.setEnabled(False)
+        self.git_push_button.setEnabled(False)
+        self.refresh_git_button.setEnabled(False)
+        self.git_status.setText(f"Basculement vers « {branch} »…")
+        task = GitBranchSwitchTask(branch)
+        self.git_switch_task = task
+        task.signals.finished.connect(self._git_branch_switched)
+        task.signals.failed.connect(self._git_branch_switch_failed)
+        self.pool.start(task)
+
+    def _git_branch_switched(self) -> None:
+        self.git_switch_task = None
+        self.refresh_catalog()
+        self.refresh_git_button.setEnabled(True)
+        self.git_push_button.setEnabled(True)
+        self.fetch_branches_button.setEnabled(True)
+        self._refresh_git_status()
+        QMessageBox.information(
+            self, "Branche modifiée", f"Vous êtes maintenant sur « {self.current_git_branch} »."
+        )
+
+    def _git_branch_switch_failed(self, error: str) -> None:
+        self.git_switch_task = None
+        self.refresh_git_button.setEnabled(True)
+        self.git_push_button.setEnabled(True)
+        self.fetch_branches_button.setEnabled(True)
+        self._refresh_git_status()
+        self.git_status.setText(f"Échec du changement de branche : {error}")
+        if "modifications non publiées" in error:
+            message = (
+                f"{error}\n\n"
+                "Pour continuer sans utiliser de commande Git :\n"
+                "1. Consultez la liste des fichiers modifiés ci-dessus.\n"
+                "2. Cochez les fichiers que vous souhaitez conserver dans le dépôt.\n"
+                "3. Saisissez un résumé du changement dans le champ du commit.\n"
+                "4. Cliquez sur « Publier les fichiers cochés » et attendez la confirmation.\n"
+                "5. Sélectionnez de nouveau la branche voulue, puis cliquez sur "
+                "« Basculer vers cette branche ».\n\n"
+                "Ne cochez pas et ne publiez pas un fichier si vous voulez abandonner ses changements : "
+                "demandez de l’aide avant de le supprimer."
+            )
+            self.git_files.setFocus()
+        else:
+            message = error
+        QMessageBox.warning(self, "Changement de branche impossible", message)
 
     def _push_git_changes(self) -> None:
         remote = self.git_remote.text().strip()
@@ -587,6 +833,8 @@ class MainWindow(QMainWindow):
 
         self.git_push_button.setEnabled(False)
         self.refresh_git_button.setEnabled(False)
+        self.fetch_branches_button.setEnabled(False)
+        self.git_switch_button.setEnabled(False)
         self.git_status.setText("Création du commit et publication en cours…")
         task = GitPushTask(remote, target_branch, message, paths, username=username, token=token)
         self.git_task = task
@@ -600,6 +848,7 @@ class MainWindow(QMainWindow):
         self.git_task = None
         self.git_push_button.setEnabled(True)
         self.refresh_git_button.setEnabled(True)
+        self.fetch_branches_button.setEnabled(True)
         self.git_commit_message.clear()
         self._refresh_git_status()
         QMessageBox.information(self, "Publication terminée", "Les fichiers sélectionnés ont été publiés.")
@@ -608,6 +857,7 @@ class MainWindow(QMainWindow):
         self.git_task = None
         self.git_push_button.setEnabled(True)
         self.refresh_git_button.setEnabled(True)
+        self.fetch_branches_button.setEnabled(True)
         self.git_status.setText(f"Échec de la publication : {error}")
         QMessageBox.critical(self, "Publication Git impossible", error)
 

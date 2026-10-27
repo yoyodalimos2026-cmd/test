@@ -26,6 +26,22 @@ class GitAndEditorTests(unittest.TestCase):
 
         self.assertEqual(labels, ["Bibliothèque", "Gestion Git", "Parcours Git"])
         self.assertTrue(hasattr(window, "git_files"))
+        self.assertTrue(hasattr(window, "fetch_branches_button"))
+        window.close()
+
+    def test_branch_switch_error_guides_user_to_publish_changes(self) -> None:
+        window = MainWindow()
+        window.git_switch_task = object()
+
+        with patch.object(window, "_refresh_git_status"), patch(
+            "app.main_window.QMessageBox.warning"
+        ) as warning:
+            window._git_branch_switch_failed(
+                "Le dossier contient des modifications non publiées."
+            )
+
+        self.assertIn("Cochez les fichiers", warning.call_args.args[2])
+        self.assertIn("Publier les fichiers cochés", warning.call_args.args[2])
         window.close()
 
     def test_branch_targets_include_local_and_remote_branches(self) -> None:

@@ -90,6 +90,18 @@ Par exemple, pour `https://github.com/marie-exemple`, saisissez `marie-exemple`.
 
 L’application crée un commit local avec le nom et l’adresse Git configurés à l’étape 2, puis pousse les fichiers cochés sur la branche sélectionnée. Les autres modifications restent non publiées. Il n’est pas nécessaire d’ajouter manuellement les fichiers dans Git avant cette opération.
 
+## Changer de branche dans l’application
+
+Il n’est pas nécessaire de fermer puis relancer Python pour changer de branche :
+
+1. Dans **Gestion Git**, choisissez une branche existante dans la liste **Publication**.
+2. Cliquez sur **Basculer vers cette branche** et confirmez.
+3. La bibliothèque recharge immédiatement les fichiers de la branche choisie ; le statut indique la branche active.
+
+Le changement est refusé si Git détecte des modifications locales ou des fichiers non suivis. Enregistrez et publiez-les avant de basculer. L’application ne les supprime pas et ne les met pas automatiquement de côté.
+
+La liste comprend les branches locales et les références distantes `origin/*` déjà connues du clone. Pour voir les dernières branches du serveur, cliquez sur **Récupérer les branches distantes** : cette action télécharge les références dans l’application, sans terminal. Pour un dépôt HTTPS privé, saisissez d’abord votre nom d’utilisateur et votre jeton. **Actualiser** relit seulement l’état local Git.
+
 ## 6. Branches : laquelle choisir ?
 
 - **Nouvelle branche** : choix recommandé. Elle part de la branche actuellement active sur votre copie locale, puis reçoit le commit sélectionné. Elle permet de demander une revue avant de fusionner le changement.
