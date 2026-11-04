@@ -90,7 +90,7 @@ Par exemple, pour `https://github.com/marie-exemple`, saisissez `marie-exemple`.
 
 ### Contrôle automatique avant publication
 
-Avant chaque publication, l’application récupère automatiquement les références du dépôt distant. Si la branche active ou la branche sélectionnée n’est plus à jour, la publication est bloquée avant le commit. L’utilisateur est informé dans la zone **Notification** et peut récupérer les branches distantes, relire les changements, puis réessayer. Aucun push forcé n’est utilisé.
+Avant chaque publication, l’application récupère automatiquement les références du dépôt distant puis exécute `pull --rebase --autostash` sur la branche concernée. Les modifications locales sont temporairement protégées et restaurées après la synchronisation. Si Git détecte un conflit réel, la publication est arrêtée avec un message explicite. Aucun push forcé n’est utilisé.
 
 La liste des fichiers utilise un code couleur : bleu = fichier ajouté, vert = fichier modifié, rouge = fichier supprimé. La notification confirme également la fin d’une synchronisation ou signale l’erreur à traiter.
 

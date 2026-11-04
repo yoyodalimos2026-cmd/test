@@ -285,7 +285,7 @@ class GitPushTask(QRunnable):
                 "branch", "--show-current", cwd=self.repo_path
             ).strip()
             if current_branch:
-                self._ensure_branch_is_current(current_branch)
+                self._synchronize_branch(current_branch)
 
             if self._git(
                 "show-ref", "--verify", f"refs/heads/{self.target_branch}", check=False, cwd=self.repo_path
@@ -309,7 +309,7 @@ class GitPushTask(QRunnable):
             else:
                 self._git("switch", "-c", self.target_branch, cwd=self.repo_path)
 
-            self._ensure_branch_is_current(self.target_branch)
+            self._synchronize_branch(self.target_branch)
 
             if not self.branch_only:
                 self._git("add", "--", *self.paths, cwd=self.repo_path)
@@ -344,27 +344,31 @@ class GitPushTask(QRunnable):
             self.username = ""
             self.token = ""
 
-    def _ensure_branch_is_current(self, branch: str) -> None:
+    def _synchronize_branch(self, branch: str) -> None:
         remote_ref = f"origin/{branch}"
         if not self._git(
             "show-ref", "--verify", f"refs/remotes/{remote_ref}",
             check=False, cwd=self.repo_path,
         ):
             return
-        counts = self._git(
-            "rev-list", "--left-right", "--count", f"{branch}...{remote_ref}",
-            cwd=self.repo_path,
-        ).split()
-        if len(counts) != 2:
-            raise RuntimeError(f"Impossible de vérifier la synchronisation de « {branch} ».")
-        behind = int(counts[1])
-        if behind:
+        try:
+            with _askpass_environment(self.username, self.token) as auth_environment:
+                pull_args = [
+                    "pull", "--rebase", "--autostash", "origin", branch,
+                ]
+                if self.username and self.token:
+                    pull_args = ["-c", "credential.helper=", *pull_args]
+                self._git(
+                    *pull_args,
+                    cwd=self.repo_path,
+                    extra_env=auth_environment,
+                )
+        except RuntimeError as error:
             raise RuntimeError(
-                f"La branche « {branch} » n’est pas à jour : le dépôt distant contient "
-                f"{behind} commit(s) supplémentaire(s).\n\n"
-                "Aucune modification n’a été commitée ni publiée. Cliquez sur "
-                "« Récupérer les branches distantes », vérifiez les changements, puis réessayez."
-            )
+                f"Impossible de synchroniser la branche « {branch} » avant publication. "
+                "Git a peut-être détecté un conflit. Aucun push forcé n’a été effectué. "
+                f"Consultez l’état du dépôt puis réessayez.\n\n{error}"
+            ) from error
 
     @staticmethod
     def _git(

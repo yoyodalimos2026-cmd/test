@@ -47,7 +47,7 @@ Git est une dépendance système et ne figure pas comme bibliothèque Python dan
 
 `GitFetchTask` récupère les références distantes (`git fetch --prune origin`) en tâche de fond. Il configure `origin` depuis l’URL saisie, utilise au besoin le même mécanisme temporaire d’authentification HTTPS, puis actualise la liste des branches. Il ne modifie pas les fichiers de travail ni la branche active.
 
-Avant les commandes de commit et de push, `GitPushTask` exécute un `fetch --prune origin`, puis compare chaque branche concernée avec `origin/<branche>` via `git rev-list --left-right --count`. Si la branche distante contient des commits absents localement, l’opération est refusée avant `git add` et `git commit`. Le push reste non forcé afin de préserver la protection contre une course réseau.
+Avant les commandes de commit et de push, `GitPushTask` exécute un `fetch --prune origin`, puis synchronise chaque branche concernée avec `git pull --rebase --autostash origin <branche>`. Les changements non commités sont protégés par Git pendant le pull. Si une réintégration est conflictuelle, l’opération est signalée et aucun push forcé n’est utilisé.
 
 Les commandes principales sont :
 

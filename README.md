@@ -232,8 +232,8 @@ Pour proposer un changement sur une nouvelle branche, ouvrez ensuite GitHub, com
 La publication applique automatiquement ce contrôle, sans commande à saisir :
 
 1. l’application récupère les dernières références de `origin` avant de créer un commit ;
-2. elle compare la branche active et la branche cible à leur version distante ;
-3. si le dépôt distant a avancé, aucune modification n’est commitée et un message rouge explique qu’il faut synchroniser et vérifier les changements ;
+2. elle synchronise la branche avec `pull --rebase --autostash` avant de créer le commit, en préservant les modifications locales non enregistrées ;
+3. si Git détecte un conflit réel pendant cette synchronisation, la publication est arrêtée explicitement ;
 4. le push n’utilise jamais `--force` : une course avec un autre utilisateur est donc refusée plutôt qu’écrasée.
 
 La page **Gestion Git** affiche une notification d’état après chaque actualisation ou récupération. Les fichiers sont différenciés par couleur : **bleu** pour un ajout, **vert** pour une modification et **rouge** pour une suppression. Cette légende permet de relire rapidement l’impact d’une mise à jour avant de cocher les fichiers.

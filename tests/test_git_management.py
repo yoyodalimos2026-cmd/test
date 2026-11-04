@@ -246,7 +246,7 @@ class GitPushTaskTests(unittest.TestCase):
         self.assertIn("déjà indexés", failed[0])
         self.assertEqual(git(self.repository, "branch", "--show-current"), "main")
 
-    def test_refuses_to_publish_when_remote_branch_has_advanced(self) -> None:
+    def test_pulls_remote_changes_before_publishing_local_changes(self) -> None:
         git(self.repository, "remote", "add", "origin", str(self.remote))
         git(self.repository, "push", "-u", "origin", "main")
 
@@ -263,14 +263,17 @@ class GitPushTaskTests(unittest.TestCase):
         (self.repository / "source.py").write_text("local = True\n", encoding="utf-8")
         _, finished, failed = self._task("main", ["source.py"])
 
-        self.assertEqual(finished, [])
-        self.assertEqual(len(failed), 1)
-        self.assertIn("n’est pas à jour", failed[0])
+        self.assertEqual(finished, ["done"])
+        self.assertEqual(failed, [])
         self.assertEqual(git(self.repository, "diff", "--cached", "--name-only"), "")
-        self.assertIn("source.py", git(self.repository, "status", "--short"))
+        self.assertEqual(git(self.repository, "status", "--short"), "")
         self.assertEqual(
             git(self.root, "--git-dir", str(self.remote), "show", "main:other.py"),
             "changed remotely = True",
+        )
+        self.assertEqual(
+            git(self.root, "--git-dir", str(self.remote), "show", "main:source.py"),
+            "local = True",
         )
 
     def test_commit_failure_leaves_selected_changes_unstaged_for_retry(self) -> None:
