@@ -62,6 +62,8 @@ La page affiche une notification persistante pour les synchronisations, les mise
 
 `GitActivityTask` récupère les références distantes toutes les 30 secondes dans un worker Qt. Il conserve un instantané des branches `origin/*`, ignore l’état initial, puis signale les nouveaux commits et les créations/suppressions de branches. La rubrique **Notifications** est mise à jour par les signaux Qt ; aucun redémarrage n’est nécessaire.
 
+Le worker utilise l’authentification Git native (`origin`, SSH ou credential helper) avec les invites terminal désactivées. Cette intégration ne dépend pas de la visibilité du dépôt : public et privé utilisent le même code. Une erreur d’accès est remontée dans la zone de notification et n’arrête pas les contrôles suivants.
+
 Les erreurs de Git sont affichées dans la fenêtre. Une erreur après le commit ne supprime pas le commit local.
 
 ## 5. Flux utilisateur Git

@@ -883,6 +883,12 @@ class MainWindow(QMainWindow):
             ACTIVE_GIT_ACTIVITY_TASKS.remove(self.git_activity_task)
         self.git_activity_task = None
         self.git_activity_snapshot = {}
+        self._set_git_notification(
+            "Surveillance Git interrompue : "
+            f"{error} Configurez une clé SSH ou un gestionnaire d’identifiants Git ; "
+            "un nouvel essai sera effectué automatiquement.",
+            warning=True,
+        )
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self.git_activity_timer.stop()

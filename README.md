@@ -254,7 +254,9 @@ Les évolutions éditoriales destinées aux utilisateurs peuvent être publiées
 
 Les activités Git sont surveillées automatiquement toutes les 30 secondes. L’application récupère les références de `origin` en arrière-plan et affiche sans redémarrage les nouveaux commits et les branches créées ou supprimées, avec la branche, le sujet, l’auteur, la date et l’identifiant abrégé du commit. Le premier contrôle établit seulement l’état de référence afin de ne pas notifier rétroactivement tout l’historique.
 
-Les notifications éditoriales sont versionnées avec le dépôt. La surveillance distante nécessite une authentification Git déjà configurée (SSH, gestionnaire d’identifiants ou jeton précédemment enregistré) ; si le dépôt n’est pas accessible, l’application conserve l’interface disponible et réessaie au contrôle suivant.
+Les notifications éditoriales sont versionnées avec le dépôt. Le code de l’application est déjà compatible avec un dépôt privé : aucun changement ne sera nécessaire lorsque la visibilité du dépôt changera. Il faut seulement préparer une fois l’accès Git de la machine, soit avec une clé SSH, soit avec Git Credential Manager (ou un autre gestionnaire d’identifiants). L’application réutilise alors cet accès pour le listener et réessaie automatiquement en cas d’erreur réseau.
+
+Pour vérifier la préparation avant de rendre le dépôt privé, utilisez **Récupérer les branches distantes** dans **Gestion Git** avec votre URL réelle. Si cette opération réussit sans redemander les identifiants à chaque fois, le listener pourra également fonctionner après le passage en privé.
 
 ### Changer de branche sans fermer l’application
 
