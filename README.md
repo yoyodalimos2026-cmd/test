@@ -242,6 +242,13 @@ Les activités Git sont surveillées automatiquement toutes les 30 secondes. L�
 
 La rubrique **Notifications** affiche uniquement les activités Git détectées. Une nouvelle activité fait clignoter le bouton supérieur en rouge ; l’ouverture de la rubrique marque les notifications comme vues et remet le compteur à zéro.
 
+Chaque notification propose l’action adaptée :
+
+- **Mettre à jour cette branche** pour un commit publié sur la branche actuellement ouverte ; l’application exécute un pull avec rebase et autostash, puis recharge la bibliothèque.
+- **Basculer vers cette branche** lorsqu’une nouvelle branche distante est détectée ; le changement passe par les contrôles habituels et est refusé si des modifications locales risquent d’être perdues.
+
+Un conflit pendant la mise à jour est signalé sans push forcé ni écrasement silencieux.
+
 Pour vérifier la préparation avant de rendre le dépôt privé, utilisez **Récupérer les branches distantes** dans **Gestion Git** avec votre URL réelle. Si cette opération réussit sans redemander les identifiants à chaque fois, le listener pourra également fonctionner après le passage en privé.
 
 Pour enregistrer l’accès de façon explicite, utilisez **Connecter le dépôt**. Saisissez l’URL HTTPS, votre nom d’utilisateur et un jeton GitHub limité au dépôt. L’application teste d’abord le jeton, puis le transmet à `git credential approve`. Si Git Credential Manager, Keychain, Secret Service ou KWallet est disponible, il est utilisé ; sinon Git configure automatiquement un cache mémoire temporaire, jamais un fichier texte. Le jeton est effacé du formulaire et n’est jamais écrit dans le code ou l’URL. Le listener et les futures synchronisations réutilisent ensuite cet accès.

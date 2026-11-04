@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import html
 import os
 import shlex
 import shutil
@@ -483,6 +482,27 @@ class GitFetchTask(QRunnable):
             self.token = ""
 
 
+class GitPullTask(QRunnable):
+    def __init__(self, branch: str, repo_path: Path = ROOT):
+        super().__init__()
+        self.branch = branch
+        self.repo_path = repo_path
+        self.signals = GitTaskSignals()
+
+    def run(self) -> None:
+        try:
+            GitPushTask._git(
+                "pull", "--rebase", "--autostash", "origin", self.branch,
+                cwd=self.repo_path,
+            )
+            self.signals.finished.emit()
+        except Exception as error:
+            self.signals.failed.emit(
+                "Impossible de mettre à jour la branche "
+                f"« {self.branch} ». Aucun push forcé n’a été effectué.\n\n{error}"
+            )
+
+
 class GitConnectTask(QRunnable):
     def __init__(
         self,
@@ -698,6 +718,7 @@ class MainWindow(QMainWindow):
         self.git_task: GitPushTask | None = None
         self.git_switch_task: GitBranchSwitchTask | None = None
         self.git_fetch_task: GitFetchTask | None = None
+        self.git_pull_task: GitPullTask | None = None
         self.git_connect_task: GitConnectTask | None = None
         self.current_git_branch = ""
         self.descriptions = self._read_descriptions()
@@ -890,9 +911,8 @@ class MainWindow(QMainWindow):
         header.addWidget(self.notifications_count)
         layout.addLayout(header)
 
-        self.notifications_view = QTextBrowser()
+        self.notifications_view = QListWidget()
         self.notifications_view.setObjectName("updates")
-        self.notifications_view.setOpenLinks(False)
         layout.addWidget(self.notifications_view, 1)
         self._render_notifications()
         return page
@@ -900,20 +920,48 @@ class MainWindow(QMainWindow):
     def _render_notifications(self) -> None:
         if not hasattr(self, "notifications_view"):
             return
-        cards: list[str] = []
+        self.notifications_view.clear()
         for activity in self.git_activities:
-            cards.append(
-                "<div class='update activity'>"
-                f"<h2>{html.escape(activity['kind'])}</h2>"
-                f"<p class='meta'>Branche : {html.escape(activity['branch'])}</p>"
-                f"<p>{html.escape(activity['details'])}</p>"
-                "</div>"
-            )
-        self.notifications_view.setHtml(
-            "".join(cards)
-            or "<h2>Aucune notification</h2><p>Aucune activité Git distante "
-            "n’a encore été détectée.</p>"
-        )
+            item = QListWidgetItem()
+            card = QWidget()
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(16, 12, 16, 12)
+            card_layout.setSpacing(6)
+            title = _label(activity["kind"], "notification_title")
+            branch = _label(f"Branche : {activity['branch']}", "notification_meta")
+            details = _label(activity["details"], "notification_details")
+            details.setWordWrap(True)
+            card_layout.addWidget(title)
+            card_layout.addWidget(branch)
+            card_layout.addWidget(details)
+
+            action: QPushButton | None = None
+            if (
+                activity["kind"] == "Nouveau commit"
+                and activity["branch"] == self.current_git_branch
+            ):
+                action = QPushButton("Mettre à jour cette branche")
+                action.clicked.connect(
+                    lambda _checked=False, branch=activity["branch"]:
+                    self._pull_notification_branch(branch)
+                )
+            elif activity["kind"] == "Branche créée":
+                action = QPushButton("Basculer vers cette branche")
+                action.clicked.connect(
+                    lambda _checked=False, branch=activity["branch"]:
+                    self._switch_notification_branch(branch)
+                )
+            if action is not None:
+                action.setObjectName("notification_action")
+                card_layout.addWidget(action, 0, Qt.AlignmentFlag.AlignLeft)
+            item.setSizeHint(card.sizeHint())
+            self.notifications_view.addItem(item)
+            self.notifications_view.setItemWidget(item, card)
+
+        if not self.git_activities:
+            empty = QListWidgetItem("Aucune notification\nAucune activité Git distante n’a été détectée.")
+            empty.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.notifications_view.addItem(empty)
         activity_count = len(self.git_activities)
         self.notifications_count.setText(
             f"{activity_count} notification(s)" if activity_count else "0 notification"
@@ -947,11 +995,58 @@ class MainWindow(QMainWindow):
             self.git_activities = (activities + self.git_activities)[:100]
             self.unread_git_activity_count += len(activities)
             self.notification_blink_timer.start()
-            self._render_notifications()
             self._set_git_notification(
                 f"{len(activities)} nouvelle(s) activité(s) Git détectée(s).",
             )
         self._refresh_git_status()
+        if activities:
+            self._render_notifications()
+
+    def _pull_notification_branch(self, branch: str) -> None:
+        if branch != self.current_git_branch:
+            return
+        if self.git_pull_task is not None or self.git_task is not None:
+            return
+        self.git_status.setText(f"Mise à jour de « {branch} »…")
+        self._set_git_notification(
+            f"Synchronisation de la branche « {branch} » en cours…"
+        )
+        task = GitPullTask(branch)
+        self.git_pull_task = task
+        task.signals.finished.connect(self._notification_pull_finished)
+        task.signals.failed.connect(self._notification_pull_failed)
+        self.pool.start(task)
+
+    def _notification_pull_finished(self) -> None:
+        self.git_pull_task = None
+        self.refresh_catalog()
+        self._refresh_git_status()
+        self._set_git_notification("La branche courante est à jour.")
+        self._render_notifications()
+
+    def _notification_pull_failed(self, error: str) -> None:
+        self.git_pull_task = None
+        self._refresh_git_status()
+        self._set_git_notification(error, warning=True)
+        _show_message(self, "Mise à jour impossible", error, QMessageBox.Icon.Warning)
+
+    def _switch_notification_branch(self, branch: str) -> None:
+        if self.git_switch_task is not None or self.git_pull_task is not None:
+            return
+        index = self.git_target.findData(branch)
+        if index < 0:
+            self._refresh_git_status()
+            index = self.git_target.findData(branch)
+        if index < 0:
+            _show_message(
+                self,
+                "Branche indisponible",
+                f"La branche « {branch} » n’est plus disponible sur le dépôt distant.",
+                QMessageBox.Icon.Warning,
+            )
+            return
+        self.git_target.setCurrentIndex(index)
+        self._switch_git_branch()
 
     def _toggle_notification_blink(self) -> None:
         if self.unread_git_activity_count:
@@ -1613,12 +1708,14 @@ class MainWindow(QMainWindow):
             #primary_button { background: #327653; color: #ffffff; border: 1px solid #327653; }
             #primary_button:hover { background: #286746; }
             #roadmap { background: #ffffff; color: #293831; border: 1px solid #e2e6de; border-radius: 5px; padding: 16px; }
-            #updates { background: #ffffff; color: #293831; border: 1px solid #e2e6de; border-radius: 5px; padding: 16px; }
-            #updates h2 { color: #327653; margin: 0 0 6px 0; }
-            #updates p { line-height: 1.45; }
-            #updates .update { background: #f7faf7; border-left: 4px solid #327653; padding: 14px 18px; margin-bottom: 14px; }
-            #updates .meta { color: #6f7e75; font-size: 10pt; }
-            #updates .tools { color: #40584a; }
+            #updates { background: #ffffff; color: #293831; border: 1px solid #e2e6de; border-radius: 5px; padding: 8px; }
+            #updates::item { background: #f7faf7; border: 1px solid #e2e6de; border-left: 4px solid #327653; border-radius: 5px; margin: 5px; padding: 0; }
+            #updates::item:hover { background: #eef6f0; }
+            #notification_title { color: #245c42; font-size: 13px; font-weight: 700; }
+            #notification_meta { color: #6f7e75; font-size: 11px; }
+            #notification_details { color: #35483d; font-size: 12px; }
+            #notification_action { background: #327653; color: #ffffff; border: 1px solid #327653; padding: 7px 12px; }
+            #notification_action:hover { background: #286746; }
             #status_line { background: #eaf2ed; color: #365344; padding: 9px 12px; border-radius: 4px; }
             #notice { color: #745d2f; background: #fff5df; border-left: 3px solid #d3a64e; padding: 10px 12px; }
             #notification { color: #245c42; background: #eaf2ed; border-left: 3px solid #327653; padding: 10px 12px; }

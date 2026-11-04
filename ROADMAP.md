@@ -104,6 +104,8 @@ La page **Gestion Git** propose aussi **Connecter le dépôt**. Avec une URL HTT
 
 La rubrique **Notifications** affiche uniquement les commits et branches détectés sur le dépôt distant. Une nouvelle activité fait clignoter le bouton supérieur en rouge. L’ouverture de la rubrique marque toutes les notifications comme vues et remet le compteur à zéro.
 
+Depuis chaque notification, l’utilisateur peut mettre à jour la branche courante ou basculer vers une nouvelle branche distante. Les mêmes protections que la page **Gestion Git** s’appliquent : rebase avec autostash pour un pull et refus du changement de branche si des modifications locales existent.
+
 L’application crée un commit local avec le nom et l’adresse Git configurés à l’étape 2, puis pousse les fichiers cochés sur la branche sélectionnée. Les autres modifications restent non publiées. Il n’est pas nécessaire d’ajouter manuellement les fichiers dans Git avant cette opération.
 
 ## Changer de branche dans l’application

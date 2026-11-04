@@ -62,6 +62,8 @@ La page affiche une notification persistante pour les synchronisations, les mise
 
 `GitActivityTask` récupère les références distantes toutes les 30 secondes dans un worker Qt. Il conserve un instantané des branches `origin/*`, ignore l’état initial, puis signale les nouveaux commits et les créations/suppressions de branches. La rubrique **Notifications** est mise à jour par les signaux Qt ; aucun redémarrage n’est nécessaire.
 
+Les cartes d’activité exposent des actions contextuelles : `GitPullTask` met à jour la branche courante via `pull --rebase --autostash`, tandis qu’une branche nouvellement détectée réutilise `GitBranchSwitchTask`. Les deux actions restent non destructives et affichent explicitement les erreurs ou conflits.
+
 Le worker utilise l’authentification Git native (`origin`, SSH ou credential helper) avec les invites terminal désactivées. Cette intégration ne dépend pas de la visibilité du dépôt : public et privé utilisent le même code. Une erreur d’accès est remontée dans la zone de notification et n’arrête pas les contrôles suivants.
 
 `GitConnectTask` vérifie un jeton HTTPS par `git ls-remote`, puis l’enregistre via `git credential approve`. Il privilégie un helper sécurisé préconfiguré ou Git Credential Manager détecté sur la machine ; à défaut, il configure `credential-cache` en mémoire pour éviter tout blocage et toute écriture en clair. Les secrets sont injectés uniquement dans l’environnement temporaire de vérification, effacés des champs après lancement et ne sont jamais persistés par l’application.
