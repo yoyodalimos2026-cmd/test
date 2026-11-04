@@ -3,6 +3,7 @@
 
 Application de bureau pour parcourir, comprendre et modifier les scripts Python et modules VBA de l’équipe. Elle permet aussi de créer un commit et de publier les fichiers sélectionnés vers un dépôt Git distant, sans demander aux utilisateurs de manipuler les commandes Git courantes.
 
+
 - [Installation et lancement](#installation-et-lancement)
 - [Utiliser la bibliothèque](#utiliser-la-bibliothèque)
 - [Modifier un fichier et le publier avec Git](#modifier-un-fichier-et-le-publier-avec-git)
