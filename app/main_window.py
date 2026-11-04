@@ -4,6 +4,7 @@ import json
 import html
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -11,6 +12,7 @@ import tokenize
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Generator
+from urllib.parse import urlsplit
 
 from PySide6.QtCore import (
     QProcess,
@@ -478,6 +480,104 @@ class GitFetchTask(QRunnable):
             self.token = ""
 
 
+class GitConnectTask(QRunnable):
+    def __init__(
+        self,
+        remote: str,
+        username: str,
+        token: str,
+        repo_path: Path = ROOT,
+    ):
+        super().__init__()
+        self.remote = remote
+        self.username = username
+        self.token = token
+        self.repo_path = repo_path
+        self.signals = GitTaskSignals()
+
+    def run(self) -> None:
+        try:
+            parsed = urlsplit(self.remote)
+            if parsed.scheme.casefold() != "https" or not parsed.hostname:
+                raise RuntimeError(
+                    "La connexion par jeton nécessite une URL HTTPS valide."
+                )
+            if parsed.username or parsed.password:
+                raise RuntimeError(
+                    "Ne placez jamais d’identifiant ou de jeton dans l’URL du dépôt."
+                )
+            helpers = GitPushTask._git(
+                "config", "--get-all", "credential.helper",
+                check=False, cwd=self.repo_path,
+            ).splitlines()
+            secure_helper = any(
+                marker in helper.casefold()
+                for helper in helpers
+                for marker in ("manager", "osxkeychain", "libsecret", "kwallet")
+            )
+            if not secure_helper:
+                manager = next(
+                    (
+                        command
+                        for command in (
+                            "git-credential-manager",
+                            "git-credential-manager-core",
+                        )
+                        if shutil.which(command)
+                    ),
+                    "",
+                )
+                if manager:
+                    GitPushTask._git(
+                        "config", "--local", "credential.helper", manager,
+                        cwd=self.repo_path,
+                    )
+                    secure_helper = True
+            if not secure_helper:
+                GitPushTask._git(
+                    "config", "--local", "credential.helper",
+                    "cache --timeout=28800",
+                    cwd=self.repo_path,
+                )
+
+            with _askpass_environment(self.username, self.token) as auth_environment:
+                GitPushTask._git(
+                    "-c", "credential.helper=", "ls-remote", self.remote, "HEAD",
+                    cwd=self.repo_path,
+                    extra_env=auth_environment,
+                )
+            credential_input = (
+                f"protocol=https\nhost={parsed.netloc}\n"
+                f"path={parsed.path.lstrip('/')}\n"
+                f"username={self.username}\npassword={self.token}\n\n"
+            )
+            result = subprocess.run(
+                ["git", "credential", "approve"],
+                cwd=self.repo_path,
+                input=credential_input,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+                check=False,
+            )
+            if result.returncode != 0:
+                raise RuntimeError(
+                    result.stderr.strip() or "Le coffre d’identifiants a refusé la connexion."
+                )
+            GitPushTask._git(
+                "remote", "set-url", "origin", self.remote, cwd=self.repo_path
+            )
+            self.signals.finished.emit()
+        except Exception as error:
+            message = str(error).replace(self.username, "[masqué]").replace(self.token, "[masqué]")
+            self.signals.failed.emit(message)
+        finally:
+            self.username = ""
+            self.token = ""
+
+
 class GitActivityTask(QRunnable):
     def __init__(self, repo_path: Path = ROOT, previous: dict[str, str] | None = None):
         super().__init__()
@@ -595,6 +695,7 @@ class MainWindow(QMainWindow):
         self.git_task: GitPushTask | None = None
         self.git_switch_task: GitBranchSwitchTask | None = None
         self.git_fetch_task: GitFetchTask | None = None
+        self.git_connect_task: GitConnectTask | None = None
         self.current_git_branch = ""
         self.descriptions = self._read_descriptions()
         self.updates = self._read_updates()
@@ -933,6 +1034,9 @@ class MainWindow(QMainWindow):
         self.git_token.setPlaceholderText("Jeton d’accès personnel (pas le mot de passe GitHub)")
         self.git_token.setEchoMode(QLineEdit.EchoMode.Password)
         credentials_row.addWidget(self.git_token, 1)
+        self.git_connect_button = QPushButton("Connecter le dépôt")
+        self.git_connect_button.clicked.connect(self._connect_git_repository)
+        credentials_row.addWidget(self.git_connect_button)
         layout.addLayout(credentials_row)
 
         self.git_status = _label("État Git du dépôt courant", "status_line")
@@ -1016,6 +1120,60 @@ class MainWindow(QMainWindow):
                 and self.git_switch_task is None
                 and self.git_task is None
             )
+
+    def _connect_git_repository(self) -> None:
+        remote = self.git_remote.text().strip()
+        username = self.git_username.text()
+        token = self.git_token.text()
+        if not remote or not username or not token:
+            _show_message(
+                self,
+                "Informations requises",
+                "Saisissez l’URL HTTPS, le nom d’utilisateur et le jeton GitHub.",
+                QMessageBox.Icon.Warning,
+            )
+            return
+        if self.git_connect_task is not None:
+            return
+        self.git_connect_button.setEnabled(False)
+        self.git_push_button.setEnabled(False)
+        self.fetch_branches_button.setEnabled(False)
+        self.git_status.setText("Vérification et enregistrement sécurisé de la connexion…")
+        task = GitConnectTask(remote, username, token)
+        self.git_connect_task = task
+        self.git_username.clear()
+        self.git_token.clear()
+        task.signals.finished.connect(self._git_connect_finished)
+        task.signals.failed.connect(self._git_connect_failed)
+        self.pool.start(task)
+
+    def _git_connect_finished(self) -> None:
+        self.git_connect_task = None
+        self.git_connect_button.setEnabled(True)
+        self.git_push_button.setEnabled(True)
+        self.fetch_branches_button.setEnabled(True)
+        self._set_git_notification(
+            "Dépôt connecté. Le listener réutilisera désormais le coffre "
+            "d’identifiants Git automatiquement."
+        )
+        self._refresh_git_status()
+        _show_message(
+            self,
+            "Dépôt connecté",
+            "Le jeton a été vérifié puis transmis au gestionnaire d’identifiants Git. "
+            "Il n’est pas enregistré dans l’application ni dans un fichier du projet. "
+            "Si aucun coffre système n’était disponible, Git l’utilise dans un cache "
+            "mémoire temporaire jusqu’à la fin de sa durée de session.",
+            QMessageBox.Icon.Information,
+        )
+
+    def _git_connect_failed(self, error: str) -> None:
+        self.git_connect_task = None
+        self.git_connect_button.setEnabled(True)
+        self.git_push_button.setEnabled(True)
+        self.fetch_branches_button.setEnabled(True)
+        self._set_git_notification(f"Connexion impossible : {error}", warning=True)
+        _show_message(self, "Connexion du dépôt impossible", error, QMessageBox.Icon.Critical)
 
     def _refresh_branch_targets(self, local_branches: set[str], remote_branches: set[str]) -> None:
         selected_target = self.git_target.currentData()

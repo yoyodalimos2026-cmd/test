@@ -64,6 +64,8 @@ La page affiche une notification persistante pour les synchronisations, les mise
 
 Le worker utilise l’authentification Git native (`origin`, SSH ou credential helper) avec les invites terminal désactivées. Cette intégration ne dépend pas de la visibilité du dépôt : public et privé utilisent le même code. Une erreur d’accès est remontée dans la zone de notification et n’arrête pas les contrôles suivants.
 
+`GitConnectTask` vérifie un jeton HTTPS par `git ls-remote`, puis l’enregistre via `git credential approve`. Il privilégie un helper sécurisé préconfiguré ou Git Credential Manager détecté sur la machine ; à défaut, il configure `credential-cache` en mémoire pour éviter tout blocage et toute écriture en clair. Les secrets sont injectés uniquement dans l’environnement temporaire de vérification, effacés des champs après lancement et ne sont jamais persistés par l’application.
+
 Les erreurs de Git sont affichées dans la fenêtre. Une erreur après le commit ne supprime pas le commit local.
 
 ## 5. Flux utilisateur Git

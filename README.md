@@ -258,6 +258,8 @@ Les notifications éditoriales sont versionnées avec le dépôt. Le code de l�
 
 Pour vérifier la préparation avant de rendre le dépôt privé, utilisez **Récupérer les branches distantes** dans **Gestion Git** avec votre URL réelle. Si cette opération réussit sans redemander les identifiants à chaque fois, le listener pourra également fonctionner après le passage en privé.
 
+Pour enregistrer l’accès de façon explicite, utilisez **Connecter le dépôt**. Saisissez l’URL HTTPS, votre nom d’utilisateur et un jeton GitHub limité au dépôt. L’application teste d’abord le jeton, puis le transmet à `git credential approve`. Si Git Credential Manager, Keychain, Secret Service ou KWallet est disponible, il est utilisé ; sinon Git configure automatiquement un cache mémoire temporaire, jamais un fichier texte. Le jeton est effacé du formulaire et n’est jamais écrit dans `updates.json`, le code ou l’URL. Le listener et les futures synchronisations réutilisent ensuite cet accès.
+
 ### Changer de branche sans fermer l’application
 
 Dans **Gestion Git**, choisissez une branche existante dans la liste puis cliquez sur **Basculer vers cette branche**. L’application met à jour la branche active et recharge la bibliothèque sans redémarrage. Les modifications non publiées (y compris les fichiers non suivis) bloquent le basculement pour éviter toute perte : publiez-les ou traitez-les avant de changer.

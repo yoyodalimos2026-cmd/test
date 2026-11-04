@@ -30,6 +30,7 @@ class GitAndEditorTests(unittest.TestCase):
         self.assertEqual(labels, ["Bibliothèque", "Notifications", "Gestion Git", "Parcours Git"])
         self.assertTrue(hasattr(window, "git_files"))
         self.assertTrue(hasattr(window, "fetch_branches_button"))
+        self.assertEqual(window.git_connect_button.text(), "Connecter le dépôt")
         self.assertEqual(window.notifications_button.text(), "Notifications (1)")
         window.close()
 

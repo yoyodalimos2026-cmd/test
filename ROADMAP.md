@@ -100,6 +100,8 @@ L’application surveille `origin` automatiquement toutes les 30 secondes, sans 
 
 Le premier contrôle établit l’état initial sans générer de fausses alertes sur l’historique existant. Les contrôles suivants affichent uniquement les nouvelles activités. Le code est prêt pour un dépôt privé. Avant de changer la visibilité, configurez une fois l’accès Git de la machine avec SSH ou un gestionnaire d’identifiants sécurisé, puis testez **Récupérer les branches distantes**. En cas d’échec réseau ou d’authentification, l’application affiche une notification explicite et réessaie automatiquement.
 
+La page **Gestion Git** propose aussi **Connecter le dépôt**. Avec une URL HTTPS, un nom d’utilisateur et un jeton limité au dépôt, l’application vérifie l’accès puis utilise le helper Git disponible. Le coffre système est privilégié ; si aucun coffre n’est installé, un cache mémoire temporaire est configuré automatiquement, sans fichier texte. Le formulaire est ensuite vidé ; le secret n’est jamais sauvegardé dans le projet.
+
 L’application crée un commit local avec le nom et l’adresse Git configurés à l’étape 2, puis pousse les fichiers cochés sur la branche sélectionnée. Les autres modifications restent non publiées. Il n’est pas nécessaire d’ajouter manuellement les fichiers dans Git avant cette opération.
 
 ## Changer de branche dans l’application
