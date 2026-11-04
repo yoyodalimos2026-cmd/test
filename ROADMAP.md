@@ -102,6 +102,8 @@ Le premier contrôle établit l’état initial sans générer de fausses alerte
 
 La page **Gestion Git** propose aussi **Connecter le dépôt**. Avec une URL HTTPS, un nom d’utilisateur et un jeton limité au dépôt, l’application vérifie l’accès puis utilise le helper Git disponible. Le coffre système est privilégié ; si aucun coffre n’est installé, un cache mémoire temporaire est configuré automatiquement, sans fichier texte. Le formulaire est ensuite vidé ; le secret n’est jamais sauvegardé dans le projet.
 
+La rubrique **Notifications** affiche uniquement les commits et branches détectés sur le dépôt distant. Une nouvelle activité fait clignoter le bouton supérieur en rouge. L’ouverture de la rubrique marque toutes les notifications comme vues et remet le compteur à zéro.
+
 L’application crée un commit local avec le nom et l’adresse Git configurés à l’étape 2, puis pousse les fichiers cochés sur la branche sélectionnée. Les autres modifications restent non publiées. Il n’est pas nécessaire d’ajouter manuellement les fichiers dans Git avant cette opération.
 
 ## Changer de branche dans l’application

@@ -54,7 +54,6 @@ from app.catalog import CatalogItem, related_items, scan_catalog
 
 ROOT = Path(__file__).resolve().parents[1]
 DESCRIPTIONS_FILE = ROOT / "module_descriptions.json"
-UPDATES_FILE = ROOT / "updates.json"
 GIT_ACTIVITY_INTERVAL_MS = 30_000
 
 
@@ -698,10 +697,10 @@ class MainWindow(QMainWindow):
         self.git_connect_task: GitConnectTask | None = None
         self.current_git_branch = ""
         self.descriptions = self._read_descriptions()
-        self.updates = self._read_updates()
         self.git_activity_snapshot: dict[str, str] = {}
         self.git_activity_task: GitActivityTask | None = None
         self.git_activities: list[dict[str, str]] = []
+        self.unread_git_activity_count = 0
         self.pool = QThreadPool.globalInstance()
         self._build_ui()
         self.refresh_catalog()
@@ -709,6 +708,9 @@ class MainWindow(QMainWindow):
         self.git_activity_timer.setInterval(GIT_ACTIVITY_INTERVAL_MS)
         self.git_activity_timer.timeout.connect(self._poll_git_activity)
         self.git_activity_timer.start()
+        self.notification_blink_timer = QTimer(self)
+        self.notification_blink_timer.setInterval(500)
+        self.notification_blink_timer.timeout.connect(self._toggle_notification_blink)
         QTimer.singleShot(0, self._poll_git_activity)
 
     def _read_descriptions(self) -> dict[str, str]:
@@ -717,31 +719,6 @@ class MainWindow(QMainWindow):
             return value if isinstance(value, dict) else {}
         except (OSError, json.JSONDecodeError):
             return {}
-
-    def _read_updates(self) -> list[dict[str, str]]:
-        try:
-            value = json.loads(UPDATES_FILE.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return []
-        if not isinstance(value, list):
-            return []
-        updates: list[dict[str, str]] = []
-        for entry in value:
-            if not isinstance(entry, dict):
-                continue
-            title = entry.get("title")
-            date = entry.get("date")
-            summary = entry.get("summary")
-            if not all(isinstance(field, str) and field.strip() for field in (title, date, summary)):
-                continue
-            updates.append({
-                "title": title.strip(),
-                "date": date.strip(),
-                "summary": summary.strip(),
-                "level": str(entry.get("level", "Information")).strip() or "Information",
-                "tools": str(entry.get("tools", "")).strip(),
-            })
-        return sorted(updates, key=lambda update: update["date"], reverse=True)
 
     @staticmethod
     def _git(*args: str, check: bool = True) -> str:
@@ -790,8 +767,9 @@ class MainWindow(QMainWindow):
         topbar_layout.setContentsMargins(34, 12, 34, 12)
         topbar_layout.addStretch(1)
         self.notifications_button = QPushButton(
-            f"Notifications ({len(self.updates)})"
+            "Notifications (0)"
         )
+        self.notifications_button.setObjectName("notification_button")
         self.notifications_button.clicked.connect(lambda: self._navigate(1))
         topbar_layout.addWidget(self.notifications_button)
         self.refresh_button = QPushButton("Actualiser le catalogue")
@@ -903,7 +881,7 @@ class MainWindow(QMainWindow):
         header.addLayout(titles)
         header.addStretch(1)
         self.notifications_count = _label(
-            f"{len(self.updates)} notification(s)", "count_badge"
+            "0 notification", "count_badge"
         )
         header.addWidget(self.notifications_count)
         layout.addLayout(header)
@@ -927,30 +905,20 @@ class MainWindow(QMainWindow):
                 f"<p>{html.escape(activity['details'])}</p>"
                 "</div>"
             )
-        for update in self.updates:
-            tools = (
-                f"<p class='tools'><b>Outils concernés :</b> "
-                f"{html.escape(update['tools'])}</p>"
-                if update["tools"] else ""
-            )
-            cards.append(
-                "<div class='update'>"
-                f"<h2>{html.escape(update['title'])}</h2>"
-                f"<p class='meta'>{html.escape(update['date'])} · "
-                f"{html.escape(update['level'])}</p>"
-                f"<p>{html.escape(update['summary'])}</p>{tools}"
-                "</div>"
-            )
         self.notifications_view.setHtml(
             "".join(cards)
             or "<h2>Aucune notification</h2><p>Aucune activité Git distante "
             "n’a encore été détectée.</p>"
         )
         activity_count = len(self.git_activities)
-        total_count = activity_count + len(self.updates)
-        self.notifications_count.setText(f"{total_count} notification(s)")
+        self.notifications_count.setText(
+            f"{activity_count} notification(s)" if activity_count else "0 notification"
+        )
         if hasattr(self, "notifications_button"):
-            self.notifications_button.setText(f"Notifications ({total_count})")
+            self.notifications_button.setText(
+                f"Notifications ({self.unread_git_activity_count})"
+            )
+            self._apply_notification_blink_style()
 
     def _poll_git_activity(self) -> None:
         if self.git_activity_task is not None:
@@ -973,11 +941,31 @@ class MainWindow(QMainWindow):
         self.git_activity_snapshot = snapshot
         if activities:
             self.git_activities = (activities + self.git_activities)[:100]
+            self.unread_git_activity_count += len(activities)
+            self.notification_blink_timer.start()
             self._render_notifications()
             self._set_git_notification(
                 f"{len(activities)} nouvelle(s) activité(s) Git détectée(s).",
             )
         self._refresh_git_status()
+
+    def _toggle_notification_blink(self) -> None:
+        if self.unread_git_activity_count:
+            self.notifications_button.setProperty(
+                "alert", not bool(self.notifications_button.property("alert"))
+            )
+            self._apply_notification_blink_style()
+
+    def _apply_notification_blink_style(self) -> None:
+        self.notifications_button.style().unpolish(self.notifications_button)
+        self.notifications_button.style().polish(self.notifications_button)
+
+    def _mark_notifications_seen(self) -> None:
+        self.unread_git_activity_count = 0
+        self.notification_blink_timer.stop()
+        self.notifications_button.setProperty("alert", False)
+        self._apply_notification_blink_style()
+        self.notifications_button.setText("Notifications (0)")
 
     def _git_activity_failed(self, error: str) -> None:
         if self.git_activity_task in ACTIVE_GIT_ACTIVITY_TASKS:
@@ -1616,6 +1604,8 @@ class MainWindow(QMainWindow):
             QPushButton { background: #ffffff; border: 1px solid #d8ded5; border-radius: 4px; padding: 9px 13px; font-weight: 600; }
             QPushButton:hover { background: #edf4ef; }
             QPushButton:disabled { color: #899187; background: #edf0ed; }
+            QPushButton#notification_button[alert="true"] { background: #c62828; color: #ffffff; border-color: #a51f1f; }
+            QPushButton#notification_button[alert="true"]:hover { background: #a51f1f; }
             #primary_button { background: #327653; color: #ffffff; border: 1px solid #327653; }
             #primary_button:hover { background: #286746; }
             #roadmap { background: #ffffff; color: #293831; border: 1px solid #e2e6de; border-radius: 5px; padding: 16px; }
@@ -1632,6 +1622,8 @@ class MainWindow(QMainWindow):
         """)
 
     def _navigate(self, index: int) -> None:
+        if index == 1:
+            self._mark_notifications_seen()
         self.pages.setCurrentIndex(index)
         for button_index, button in enumerate(self.nav_buttons):
             button.setChecked(button_index == index)

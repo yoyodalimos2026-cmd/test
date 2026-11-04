@@ -6,7 +6,6 @@ Application de bureau pour parcourir, comprendre et modifier les scripts Python 
 - [Utiliser la bibliothèque](#utiliser-la-bibliothèque)
 - [Modifier un fichier et le publier avec Git](#modifier-un-fichier-et-le-publier-avec-git)
 - [Workflow anti-conflit](#workflow-anti-conflit)
-- [Publier une notification](#publier-une-notification)
 - [Configurer un jeton GitHub](#configurer-un-jeton-github)
 - [Résoudre les problèmes Git courants](#résoudre-les-problèmes-git-courants)
 - [Dépendances et tests](#dépendances-et-tests)
@@ -238,27 +237,13 @@ La publication applique automatiquement ce contrôle, sans commande à saisir :
 
 La page **Gestion Git** affiche une notification d’état après chaque actualisation ou récupération. Les fichiers sont différenciés par couleur : **bleu** pour un ajout, **vert** pour une modification et **rouge** pour une suppression. Cette légende permet de relire rapidement l’impact d’une mise à jour avant de cocher les fichiers.
 
-### Publier une notification
-
-Les évolutions éditoriales destinées aux utilisateurs peuvent être publiées dans [updates.json](./updates.json). Ajoutez une entrée avec les champs `date` (`AAAA-MM-JJ`), `title`, `summary`, `level` et, si nécessaire, `tools`.
-
-```json
-{
-  "date": "2026-11-05",
-  "level": "Information",
-  "title": "Nouveau traitement disponible",
-  "summary": "Le traitement ... est maintenant disponible.",
-  "tools": "Nom de l’outil"
-}
-```
-
 Les activités Git sont surveillées automatiquement toutes les 30 secondes. L’application récupère les références de `origin` en arrière-plan et affiche sans redémarrage les nouveaux commits et les branches créées ou supprimées, avec la branche, le sujet, l’auteur, la date et l’identifiant abrégé du commit. Le premier contrôle établit seulement l’état de référence afin de ne pas notifier rétroactivement tout l’historique.
 
-Les notifications éditoriales sont versionnées avec le dépôt. Le code de l’application est déjà compatible avec un dépôt privé : aucun changement ne sera nécessaire lorsque la visibilité du dépôt changera. Il faut seulement préparer une fois l’accès Git de la machine, soit avec une clé SSH, soit avec Git Credential Manager (ou un autre gestionnaire d’identifiants). L’application réutilise alors cet accès pour le listener et réessaie automatiquement en cas d’erreur réseau.
+La rubrique **Notifications** affiche uniquement les activités Git détectées. Une nouvelle activité fait clignoter le bouton supérieur en rouge ; l’ouverture de la rubrique marque les notifications comme vues et remet le compteur à zéro.
 
 Pour vérifier la préparation avant de rendre le dépôt privé, utilisez **Récupérer les branches distantes** dans **Gestion Git** avec votre URL réelle. Si cette opération réussit sans redemander les identifiants à chaque fois, le listener pourra également fonctionner après le passage en privé.
 
-Pour enregistrer l’accès de façon explicite, utilisez **Connecter le dépôt**. Saisissez l’URL HTTPS, votre nom d’utilisateur et un jeton GitHub limité au dépôt. L’application teste d’abord le jeton, puis le transmet à `git credential approve`. Si Git Credential Manager, Keychain, Secret Service ou KWallet est disponible, il est utilisé ; sinon Git configure automatiquement un cache mémoire temporaire, jamais un fichier texte. Le jeton est effacé du formulaire et n’est jamais écrit dans `updates.json`, le code ou l’URL. Le listener et les futures synchronisations réutilisent ensuite cet accès.
+Pour enregistrer l’accès de façon explicite, utilisez **Connecter le dépôt**. Saisissez l’URL HTTPS, votre nom d’utilisateur et un jeton GitHub limité au dépôt. L’application teste d’abord le jeton, puis le transmet à `git credential approve`. Si Git Credential Manager, Keychain, Secret Service ou KWallet est disponible, il est utilisé ; sinon Git configure automatiquement un cache mémoire temporaire, jamais un fichier texte. Le jeton est effacé du formulaire et n’est jamais écrit dans le code ou l’URL. Le listener et les futures synchronisations réutilisent ensuite cet accès.
 
 ### Changer de branche sans fermer l’application
 

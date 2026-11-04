@@ -31,7 +31,7 @@ class GitAndEditorTests(unittest.TestCase):
         self.assertTrue(hasattr(window, "git_files"))
         self.assertTrue(hasattr(window, "fetch_branches_button"))
         self.assertEqual(window.git_connect_button.text(), "Connecter le dépôt")
-        self.assertEqual(window.notifications_button.text(), "Notifications (1)")
+        self.assertEqual(window.notifications_button.text(), "Notifications (0)")
         window.close()
 
     def test_branch_switch_error_guides_user_to_publish_changes(self) -> None:
