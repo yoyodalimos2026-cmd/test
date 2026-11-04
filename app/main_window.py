@@ -22,6 +22,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -699,6 +700,9 @@ class MainWindow(QMainWindow):
             legend.addWidget(marker)
         legend.addStretch(1)
         layout.addLayout(legend)
+        self.git_select_all = QCheckBox("Tout sélectionner")
+        self.git_select_all.stateChanged.connect(self._toggle_all_git_files)
+        layout.addWidget(self.git_select_all)
         self.git_files = QListWidget()
         self.git_files.setSelectionMode(QListWidget.SelectionMode.NoSelection)
         layout.addWidget(self.git_files, 1)
@@ -799,6 +803,9 @@ class MainWindow(QMainWindow):
 
         self.current_git_branch = branch
         self._refresh_branch_targets(local_branches, remote_branches)
+        self.git_select_all.blockSignals(True)
+        self.git_select_all.setCheckState(Qt.CheckState.Unchecked)
+        self.git_select_all.blockSignals(False)
         self.git_files.clear()
         index = 0
         changed_count = 0
@@ -835,6 +842,17 @@ class MainWindow(QMainWindow):
             if changed_count == 0
             else f"{changed_count} modification(s) détectée(s). Sélectionnez uniquement les fichiers à publier."
         )
+
+    def _toggle_all_git_files(self, state: int) -> None:
+        target_state = (
+            Qt.CheckState.Checked
+            if state == Qt.CheckState.Checked.value
+            else Qt.CheckState.Unchecked
+        )
+        self.git_files.blockSignals(True)
+        for index in range(self.git_files.count()):
+            self.git_files.item(index).setCheckState(target_state)
+        self.git_files.blockSignals(False)
 
     def _set_git_notification(self, message: str, warning: bool = False) -> None:
         self.git_notification.setText(f"Notification : {message}")

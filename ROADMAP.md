@@ -82,7 +82,7 @@ Par exemple, pour `https://github.com/marie-exemple`, saisissez `marie-exemple`.
 3. Ouvrez **Gestion Git**. Vérifiez que **Dépôt distant** affiche la bonne URL HTTPS du dépôt. L’application utilise le remote `origin` et le met à jour avec l’URL saisie lors de la publication.
 4. Si vous utilisez HTTPS, saisissez le nom d’utilisateur GitHub et collez le PAT dans le champ masqué. Pour une URL SSH, laissez les champs d’identifiants vides et utilisez votre clé SSH déjà configurée.
 5. Cliquez sur **Actualiser** pour afficher les modifications détectées.
-6. Cochez uniquement les fichiers que vous souhaitez envoyer. Vérifiez leurs chemins dans la liste.
+6. Cochez uniquement les fichiers que vous souhaitez envoyer. Utilisez **Tout sélectionner** pour cocher ou décocher en une fois tous les fichiers ajoutés, modifiés et supprimés. Vérifiez leurs chemins dans la liste.
 7. Choisissez **Nouvelle branche** de préférence et donnez-lui un nom explicite (par exemple `feature/description-outil` ou `fix/correction-export`), ou sélectionnez une branche existante dans la liste. Les branches connues de `origin` sont affichées avec la mention « distante » ; l’application crée leur branche locale de suivi au moment de la publication. Choisissez `main` uniquement si votre équipe autorise les pushes directs.
 8. Entrez un résumé clair du changement, par exemple `docs: expliquer la publication avec Git`.
 9. Cliquez sur **Publier les fichiers cochés**, relisez la confirmation et confirmez.

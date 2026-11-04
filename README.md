@@ -216,7 +216,7 @@ Utilisez une adresse de commit appropriée à la politique de votre équipe, év
 3. Ouvrez la page **Gestion Git** et vérifiez l’URL HTTPS du dépôt distant. L’URL doit correspondre au dépôt cloné et au compte ou à l’organisation qui le possède. Le remote utilisé est `origin`.
 4. Pour une URL HTTPS, saisissez votre nom d’utilisateur et un jeton dans les champs d’identification. Pour une URL SSH, laissez ces champs vides et configurez votre clé SSH dans Git.
 5. Cliquez sur **Actualiser**. La liste indique les fichiers modifiés, supprimés ou non suivis et recharge les branches déjà présentes dans le clone.
-6. Cochez uniquement les fichiers qui doivent faire partie de ce changement. Vérifiez les chemins avant de continuer.
+6. Cochez uniquement les fichiers qui doivent faire partie de ce changement. Vous pouvez utiliser **Tout sélectionner** pour inclure tous les fichiers ajoutés, modifiés ou supprimés, puis décocher ceux à exclure. Vérifiez les chemins avant de continuer.
 7. Choisissez **Nouvelle branche** de préférence et indiquez un nom tel que `feature/description-outil` ou `fix/correction-export`, ou sélectionnez une branche existante affichée dans la liste. Les branches distantes connues sont indiquées comme « distante » ; la copie locale de suivi est créée automatiquement à la publication. Choisissez `main` seulement si votre équipe autorise le push direct.
 8. Si vous avez coché des fichiers, écrivez un résumé clair du changement, par exemple `docs: clarifier les instructions Git`. Si vous créez une branche sans publier de fichier, aucun résumé n’est nécessaire.
 9. Cliquez sur **Publier / créer une branche** et relisez la confirmation avant de valider.
