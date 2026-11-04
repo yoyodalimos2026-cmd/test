@@ -16,6 +16,8 @@ L’application aide une équipe à explorer des modules VBA et des scripts Pyth
 - Laisser l’utilisateur choisir les fichiers à inclure, le message de commit et une branche locale/distante, ou créer une branche.
 - Créer un commit local et tenter de le pousser vers `origin`.
 - Permettre l’authentification HTTPS par identifiant et jeton à usage ponctuel, ou réutiliser la configuration SSH/Git existante.
+- Vérifier automatiquement la fraîcheur des branches avant tout commit ou push et notifier l’utilisateur des évolutions.
+- Différencier visuellement les ajouts, modifications et suppressions dans la liste Git.
 
 ## 3. Technologies et dépendances
 
@@ -44,6 +46,8 @@ Git est une dépendance système et ne figure pas comme bibliothèque Python dan
 
 `GitFetchTask` récupère les références distantes (`git fetch --prune origin`) en tâche de fond. Il configure `origin` depuis l’URL saisie, utilise au besoin le même mécanisme temporaire d’authentification HTTPS, puis actualise la liste des branches. Il ne modifie pas les fichiers de travail ni la branche active.
 
+Avant les commandes de commit et de push, `GitPushTask` exécute un `fetch --prune origin`, puis compare chaque branche concernée avec `origin/<branche>` via `git rev-list --left-right --count`. Si la branche distante contient des commits absents localement, l’opération est refusée avant `git add` et `git commit`. Le push reste non forcé afin de préserver la protection contre une course réseau.
+
 Les commandes principales sont :
 
 1. vérifier l’absence de changements déjà indexés par l’utilisateur ;
@@ -52,6 +56,8 @@ Les commandes principales sont :
 4. indexer les chemins explicitement cochés ;
 5. créer un commit si ces chemins produisent un changement indexé ;
 6. pousser la branche choisie vers `origin`.
+
+La page affiche une notification persistante pour les synchronisations, les mises à jour détectées et les erreurs. Les fichiers ajoutés, modifiés et supprimés sont respectivement affichés en bleu, vert et rouge.
 
 Les erreurs de Git sont affichées dans la fenêtre. Une erreur après le commit ne supprime pas le commit local.
 

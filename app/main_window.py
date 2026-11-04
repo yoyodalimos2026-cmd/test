@@ -19,7 +19,7 @@ from PySide6.QtCore import (
     Signal,
     QObject,
 )
-from PySide6.QtGui import QFont
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -260,6 +260,22 @@ class GitPushTask(QRunnable):
             else:
                 self._git("remote", "set-url", "origin", self.remote, cwd=self.repo_path)
 
+            with _askpass_environment(self.username, self.token) as auth_environment:
+                fetch_args = ["fetch", "--prune", "origin"]
+                if self.username and self.token:
+                    fetch_args = ["-c", "credential.helper=", *fetch_args]
+                self._git(
+                    *fetch_args,
+                    cwd=self.repo_path,
+                    extra_env=auth_environment,
+                )
+
+            current_branch = self._git(
+                "branch", "--show-current", cwd=self.repo_path
+            ).strip()
+            if current_branch:
+                self._ensure_branch_is_current(current_branch)
+
             if self._git(
                 "show-ref", "--verify", f"refs/heads/{self.target_branch}", check=False, cwd=self.repo_path
             ):
@@ -281,6 +297,8 @@ class GitPushTask(QRunnable):
                 )
             else:
                 self._git("switch", "-c", self.target_branch, cwd=self.repo_path)
+
+            self._ensure_branch_is_current(self.target_branch)
 
             if not self.branch_only:
                 self._git("add", "--", *self.paths, cwd=self.repo_path)
@@ -314,6 +332,28 @@ class GitPushTask(QRunnable):
         finally:
             self.username = ""
             self.token = ""
+
+    def _ensure_branch_is_current(self, branch: str) -> None:
+        remote_ref = f"origin/{branch}"
+        if not self._git(
+            "show-ref", "--verify", f"refs/remotes/{remote_ref}",
+            check=False, cwd=self.repo_path,
+        ):
+            return
+        counts = self._git(
+            "rev-list", "--left-right", "--count", f"{branch}...{remote_ref}",
+            cwd=self.repo_path,
+        ).split()
+        if len(counts) != 2:
+            raise RuntimeError(f"Impossible de vérifier la synchronisation de « {branch} ».")
+        behind = int(counts[1])
+        if behind:
+            raise RuntimeError(
+                f"La branche « {branch} » n’est pas à jour : le dépôt distant contient "
+                f"{behind} commit(s) supplémentaire(s).\n\n"
+                "Aucune modification n’a été commitée ni publiée. Cliquez sur "
+                "« Récupérer les branches distantes », vérifiez les changements, puis réessayez."
+            )
 
     @staticmethod
     def _git(
@@ -641,6 +681,24 @@ class MainWindow(QMainWindow):
 
         self.git_status = _label("État Git du dépôt courant", "status_line")
         layout.addWidget(self.git_status)
+        self.git_notification = _label(
+            "Notification : la synchronisation avec origin est contrôlée automatiquement avant chaque publication.",
+            "notification",
+        )
+        self.git_notification.setWordWrap(True)
+        layout.addWidget(self.git_notification)
+        legend = QHBoxLayout()
+        legend.addWidget(_label("LÉGENDE", "section_label"))
+        for text, color in (
+            ("Ajouté", "#245fbe"),
+            ("Modifié", "#287a42"),
+            ("Supprimé", "#b52d36"),
+        ):
+            marker = _label(f"■ {text}")
+            marker.setStyleSheet(f"color: {color}; font-weight: 700;")
+            legend.addWidget(marker)
+        legend.addStretch(1)
+        layout.addLayout(legend)
         self.git_files = QListWidget()
         self.git_files.setSelectionMode(QListWidget.SelectionMode.NoSelection)
         layout.addWidget(self.git_files, 1)
@@ -756,6 +814,15 @@ class MainWindow(QMainWindow):
             item.setData(Qt.ItemDataRole.UserRole, path)
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
             item.setCheckState(Qt.CheckState.Unchecked)
+            if "?" in status or "A" in status:
+                item.setForeground(QColor("#245fbe"))
+                item.setToolTip("Fichier ajouté")
+            elif "D" in status:
+                item.setForeground(QColor("#b52d36"))
+                item.setToolTip("Fichier supprimé")
+            else:
+                item.setForeground(QColor("#287a42"))
+                item.setToolTip("Fichier modifié")
             self.git_files.addItem(item)
             changed_count += 1
 
@@ -763,6 +830,17 @@ class MainWindow(QMainWindow):
         if changed_count == 0:
             summary += " · aucun changement à publier"
         self.git_status.setText(summary)
+        self._set_git_notification(
+            "Aucune modification locale détectée. Vous pouvez travailler normalement."
+            if changed_count == 0
+            else f"{changed_count} modification(s) détectée(s). Sélectionnez uniquement les fichiers à publier."
+        )
+
+    def _set_git_notification(self, message: str, warning: bool = False) -> None:
+        self.git_notification.setText(f"Notification : {message}")
+        self.git_notification.setProperty("warning", warning)
+        self.git_notification.style().unpolish(self.git_notification)
+        self.git_notification.style().polish(self.git_notification)
 
     def _fetch_git_branches(self) -> None:
         remote = self.git_remote.text().strip()
@@ -802,6 +880,7 @@ class MainWindow(QMainWindow):
         self.git_push_button.setEnabled(False)
         self.git_switch_button.setEnabled(False)
         self.git_status.setText("Récupération des branches depuis origin…")
+        self._set_git_notification("Synchronisation avec le dépôt distant en cours…")
         task = GitFetchTask(remote, username=username, token=token)
         self.git_fetch_task = task
         self.git_username.clear()
@@ -816,6 +895,9 @@ class MainWindow(QMainWindow):
         self.refresh_git_button.setEnabled(True)
         self.git_push_button.setEnabled(True)
         self._refresh_git_status()
+        self._set_git_notification(
+            "Synchronisation terminée : les branches et mises à jour distantes sont disponibles."
+        )
         _show_message(
             self,
             "Branches actualisées",
@@ -830,6 +912,7 @@ class MainWindow(QMainWindow):
         self.git_push_button.setEnabled(True)
         self._refresh_git_status()
         self.git_status.setText(f"Échec de la récupération des branches : {error}")
+        self._set_git_notification(f"Synchronisation impossible : {error}", warning=True)
         _show_message(self, "Récupération impossible", error, QMessageBox.Icon.Critical)
 
     def _switch_git_branch(self) -> None:
@@ -997,6 +1080,9 @@ class MainWindow(QMainWindow):
             if branch_only
             else "Création du commit et publication en cours…"
         )
+        self._set_git_notification(
+            "Vérification de la version distante avant publication…"
+        )
         task = GitPushTask(
             remote,
             target_branch,
@@ -1022,6 +1108,10 @@ class MainWindow(QMainWindow):
         if task is None or not task.branch_only:
             self.git_commit_message.clear()
         self._refresh_git_status()
+        self._set_git_notification(
+            "Mise à jour publiée. Les autres utilisateurs verront cette évolution "
+            "à leur prochaine synchronisation."
+        )
         _show_message(
             self,
             "Branche créée" if task and task.branch_only else "Publication terminée",
@@ -1039,6 +1129,10 @@ class MainWindow(QMainWindow):
         self.refresh_git_button.setEnabled(True)
         self.fetch_branches_button.setEnabled(True)
         self.git_status.setText(f"Échec de la publication : {error}")
+        self._set_git_notification(
+            f"Publication bloquée : {error}",
+            warning=True,
+        )
         _show_message(self, "Publication Git impossible", error, QMessageBox.Icon.Critical)
 
     def _build_roadmap_page(self) -> QWidget:
@@ -1096,6 +1190,8 @@ class MainWindow(QMainWindow):
             #roadmap { background: #ffffff; color: #293831; border: 1px solid #e2e6de; border-radius: 5px; padding: 16px; }
             #status_line { background: #eaf2ed; color: #365344; padding: 9px 12px; border-radius: 4px; }
             #notice { color: #745d2f; background: #fff5df; border-left: 3px solid #d3a64e; padding: 10px 12px; }
+            #notification { color: #245c42; background: #eaf2ed; border-left: 3px solid #327653; padding: 10px 12px; }
+            #notification[warning="true"] { color: #8b3f2a; background: #fff0e8; border-left-color: #c45c3d; }
         """)
 
     def _navigate(self, index: int) -> None:

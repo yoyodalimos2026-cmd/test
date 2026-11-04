@@ -5,6 +5,7 @@ Application de bureau pour parcourir, comprendre et modifier les scripts Python 
 - [Installation et lancement](#installation-et-lancement)
 - [Utiliser la bibliothèque](#utiliser-la-bibliothèque)
 - [Modifier un fichier et le publier avec Git](#modifier-un-fichier-et-le-publier-avec-git)
+- [Workflow anti-conflit](#workflow-anti-conflit)
 - [Configurer un jeton GitHub](#configurer-un-jeton-github)
 - [Résoudre les problèmes Git courants](#résoudre-les-problèmes-git-courants)
 - [Dépendances et tests](#dépendances-et-tests)
@@ -224,6 +225,17 @@ Utilisez une adresse de commit appropriée à la politique de votre équipe, év
 L’application prépare uniquement les fichiers cochés. Les autres changements du dossier de travail restent non inclus. Si des fichiers étaient déjà indexés (`git add`) dans un terminal, l’opération est arrêtée afin de ne pas les inclure par erreur. Le commit est créé sur la branche sélectionnée ; une branche distante sans branche locale correspondante est d’abord créée en suivi de `origin`.
 
 Pour proposer un changement sur une nouvelle branche, ouvrez ensuite GitHub, comparez cette branche à `main` et créez une **Pull request** pour demander une revue. Les organisations peuvent exiger une Pull request et interdire les pushes directs sur `main`.
+
+### Workflow anti-conflit et notifications
+
+La publication applique automatiquement ce contrôle, sans commande à saisir :
+
+1. l’application récupère les dernières références de `origin` avant de créer un commit ;
+2. elle compare la branche active et la branche cible à leur version distante ;
+3. si le dépôt distant a avancé, aucune modification n’est commitée et un message rouge explique qu’il faut synchroniser et vérifier les changements ;
+4. le push n’utilise jamais `--force` : une course avec un autre utilisateur est donc refusée plutôt qu’écrasée.
+
+La page **Gestion Git** affiche une notification d’état après chaque actualisation ou récupération. Les fichiers sont différenciés par couleur : **bleu** pour un ajout, **vert** pour une modification et **rouge** pour une suppression. Cette légende permet de relire rapidement l’impact d’une mise à jour avant de cocher les fichiers.
 
 ### Changer de branche sans fermer l’application
 

@@ -88,6 +88,12 @@ Par exemple, pour `https://github.com/marie-exemple`, saisissez `marie-exemple`.
 9. Cliquez sur **Publier les fichiers cochés**, relisez la confirmation et confirmez.
 10. Attendez le résultat affiché par l’application. En cas de succès, le commit et le push ont été effectués.
 
+### Contrôle automatique avant publication
+
+Avant chaque publication, l’application récupère automatiquement les références du dépôt distant. Si la branche active ou la branche sélectionnée n’est plus à jour, la publication est bloquée avant le commit. L’utilisateur est informé dans la zone **Notification** et peut récupérer les branches distantes, relire les changements, puis réessayer. Aucun push forcé n’est utilisé.
+
+La liste des fichiers utilise un code couleur : bleu = fichier ajouté, vert = fichier modifié, rouge = fichier supprimé. La notification confirme également la fin d’une synchronisation ou signale l’erreur à traiter.
+
 L’application crée un commit local avec le nom et l’adresse Git configurés à l’étape 2, puis pousse les fichiers cochés sur la branche sélectionnée. Les autres modifications restent non publiées. Il n’est pas nécessaire d’ajouter manuellement les fichiers dans Git avant cette opération.
 
 ## Changer de branche dans l’application
