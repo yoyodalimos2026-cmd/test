@@ -1,6 +1,5 @@
 Attribute VB_Name = "Module1"
 
-
 Public Choix_CBO As String
 Public Fichier_trame As String
 
