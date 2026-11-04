@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import html
 import os
 import shlex
 import subprocess
@@ -15,11 +16,12 @@ from PySide6.QtCore import (
     QProcess,
     QRunnable,
     QThreadPool,
+    QTimer,
     Qt,
     Signal,
     QObject,
 )
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QCloseEvent, QColor, QFont
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -50,6 +52,8 @@ from app.catalog import CatalogItem, related_items, scan_catalog
 
 ROOT = Path(__file__).resolve().parents[1]
 DESCRIPTIONS_FILE = ROOT / "module_descriptions.json"
+UPDATES_FILE = ROOT / "updates.json"
+GIT_ACTIVITY_INTERVAL_MS = 30_000
 
 
 def _show_message(
@@ -204,6 +208,11 @@ def _askpass_environment(username: str, token: str) -> Generator[dict[str, str],
 
 class GitTaskSignals(QObject):
     finished = Signal()
+    failed = Signal(str)
+
+
+class GitActivitySignals(QObject):
+    activity = Signal(object, object)
     failed = Signal(str)
 
 
@@ -469,6 +478,104 @@ class GitFetchTask(QRunnable):
             self.token = ""
 
 
+class GitActivityTask(QRunnable):
+    def __init__(self, repo_path: Path = ROOT, previous: dict[str, str] | None = None):
+        super().__init__()
+        self.setAutoDelete(False)
+        self.repo_path = repo_path
+        self.previous = previous or {}
+        self.cancelled = False
+        self.signals = GitActivitySignals()
+
+    def run(self) -> None:
+        try:
+            remote = GitPushTask._git(
+                "remote", "get-url", "origin", check=False, cwd=self.repo_path
+            ).strip()
+            if not remote:
+                if not self.cancelled:
+                    self._emit_activity({}, [])
+                return
+            GitPushTask._git("fetch", "--prune", "origin", cwd=self.repo_path)
+            current = self._snapshot()
+            activities: list[dict[str, str]] = []
+            if self.previous:
+                old_branches = set(self.previous)
+                new_branches = set(current)
+                for branch in sorted(new_branches - old_branches):
+                    activities.append({
+                        "kind": "Branche créée",
+                        "branch": branch,
+                        "details": f"Nouvelle branche distante « {branch} ».",
+                    })
+                for branch in sorted(old_branches - new_branches):
+                    activities.append({
+                        "kind": "Branche supprimée",
+                        "branch": branch,
+                        "details": f"Branche distante supprimée « {branch} ».",
+                    })
+                for branch in sorted(new_branches & old_branches):
+                    if current[branch] != self.previous[branch]:
+                        activities.extend(self._new_commits(branch, self.previous[branch]))
+            if not self.cancelled:
+                self.activity_result = (current, activities)
+                self._emit_activity(current, activities)
+        except Exception as error:
+            if not self.cancelled:
+                try:
+                    self.signals.failed.emit(str(error))
+                except RuntimeError:
+                    pass
+
+    def _emit_activity(
+        self,
+        snapshot: dict[str, str],
+        activities: list[dict[str, str]],
+    ) -> None:
+        try:
+            self.signals.activity.emit(snapshot, activities)
+        except RuntimeError:
+            self.cancelled = True
+
+    def _snapshot(self) -> dict[str, str]:
+        output = GitPushTask._git(
+            "for-each-ref",
+            "--format=%(refname:short)\t%(objectname)",
+            "refs/remotes/origin",
+            cwd=self.repo_path,
+        )
+        return {
+            parts[0].removeprefix("origin/"): parts[1]
+            for line in output.splitlines()
+            if len(parts := line.split("\t", 1)) == 2
+            and parts[0] != "origin/HEAD"
+        }
+
+    def _new_commits(self, branch: str, old_hash: str) -> list[dict[str, str]]:
+        output = GitPushTask._git(
+            "log",
+            "--format=%H\t%an\t%ad\t%s",
+            "--date=short",
+            f"{old_hash}..origin/{branch}",
+            cwd=self.repo_path,
+        )
+        activities = []
+        for line in output.splitlines():
+            parts = line.split("\t", 3)
+            if len(parts) != 4:
+                continue
+            commit, author, date, subject = parts
+            activities.append({
+                "kind": "Nouveau commit",
+                "branch": branch,
+                "details": f"{subject} — {author} ({date}) · {commit[:8]}",
+            })
+        return activities
+
+
+ACTIVE_GIT_ACTIVITY_TASKS: list[GitActivityTask] = []
+
+
 def _label(text: str, style: str = "") -> QLabel:
     widget = QLabel(text)
     if style:
@@ -490,9 +597,18 @@ class MainWindow(QMainWindow):
         self.git_fetch_task: GitFetchTask | None = None
         self.current_git_branch = ""
         self.descriptions = self._read_descriptions()
+        self.updates = self._read_updates()
+        self.git_activity_snapshot: dict[str, str] = {}
+        self.git_activity_task: GitActivityTask | None = None
+        self.git_activities: list[dict[str, str]] = []
         self.pool = QThreadPool.globalInstance()
         self._build_ui()
         self.refresh_catalog()
+        self.git_activity_timer = QTimer(self)
+        self.git_activity_timer.setInterval(GIT_ACTIVITY_INTERVAL_MS)
+        self.git_activity_timer.timeout.connect(self._poll_git_activity)
+        self.git_activity_timer.start()
+        QTimer.singleShot(0, self._poll_git_activity)
 
     def _read_descriptions(self) -> dict[str, str]:
         try:
@@ -500,6 +616,31 @@ class MainWindow(QMainWindow):
             return value if isinstance(value, dict) else {}
         except (OSError, json.JSONDecodeError):
             return {}
+
+    def _read_updates(self) -> list[dict[str, str]]:
+        try:
+            value = json.loads(UPDATES_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        if not isinstance(value, list):
+            return []
+        updates: list[dict[str, str]] = []
+        for entry in value:
+            if not isinstance(entry, dict):
+                continue
+            title = entry.get("title")
+            date = entry.get("date")
+            summary = entry.get("summary")
+            if not all(isinstance(field, str) and field.strip() for field in (title, date, summary)):
+                continue
+            updates.append({
+                "title": title.strip(),
+                "date": date.strip(),
+                "summary": summary.strip(),
+                "level": str(entry.get("level", "Information")).strip() or "Information",
+                "tools": str(entry.get("tools", "")).strip(),
+            })
+        return sorted(updates, key=lambda update: update["date"], reverse=True)
 
     @staticmethod
     def _git(*args: str, check: bool = True) -> str:
@@ -524,6 +665,7 @@ class MainWindow(QMainWindow):
         self.pages = QStackedWidget()
         for index, (text, page) in enumerate(
             (("Bibliothèque", self._build_library_page()),
+             ("Notifications", self._build_notifications_page()),
              ("Gestion Git", self._build_git_page()),
              ("Parcours Git", self._build_roadmap_page()))
         ):
@@ -546,6 +688,11 @@ class MainWindow(QMainWindow):
         topbar_layout = QHBoxLayout(topbar)
         topbar_layout.setContentsMargins(34, 12, 34, 12)
         topbar_layout.addStretch(1)
+        self.notifications_button = QPushButton(
+            f"Notifications ({len(self.updates)})"
+        )
+        self.notifications_button.clicked.connect(lambda: self._navigate(1))
+        topbar_layout.addWidget(self.notifications_button)
         self.refresh_button = QPushButton("Actualiser le catalogue")
         self.refresh_button.clicked.connect(self.refresh_catalog)
         topbar_layout.addWidget(self.refresh_button)
@@ -640,6 +787,108 @@ class MainWindow(QMainWindow):
         splitter.setSizes([390, 700])
         layout.addWidget(splitter, 1)
         return page
+
+    def _build_notifications_page(self) -> QWidget:
+        page, layout = self._page()
+        header = QHBoxLayout()
+        titles = QVBoxLayout()
+        titles.addWidget(_label("Notifications", "page_title"))
+        titles.addWidget(
+            _label(
+                "Les évolutions et mises à jour publiées par l’équipe sont regroupées ici.",
+                "muted",
+            )
+        )
+        header.addLayout(titles)
+        header.addStretch(1)
+        self.notifications_count = _label(
+            f"{len(self.updates)} notification(s)", "count_badge"
+        )
+        header.addWidget(self.notifications_count)
+        layout.addLayout(header)
+
+        self.notifications_view = QTextBrowser()
+        self.notifications_view.setObjectName("updates")
+        self.notifications_view.setOpenLinks(False)
+        layout.addWidget(self.notifications_view, 1)
+        self._render_notifications()
+        return page
+
+    def _render_notifications(self) -> None:
+        if not hasattr(self, "notifications_view"):
+            return
+        cards: list[str] = []
+        for activity in self.git_activities:
+            cards.append(
+                "<div class='update activity'>"
+                f"<h2>{html.escape(activity['kind'])}</h2>"
+                f"<p class='meta'>Branche : {html.escape(activity['branch'])}</p>"
+                f"<p>{html.escape(activity['details'])}</p>"
+                "</div>"
+            )
+        for update in self.updates:
+            tools = (
+                f"<p class='tools'><b>Outils concernés :</b> "
+                f"{html.escape(update['tools'])}</p>"
+                if update["tools"] else ""
+            )
+            cards.append(
+                "<div class='update'>"
+                f"<h2>{html.escape(update['title'])}</h2>"
+                f"<p class='meta'>{html.escape(update['date'])} · "
+                f"{html.escape(update['level'])}</p>"
+                f"<p>{html.escape(update['summary'])}</p>{tools}"
+                "</div>"
+            )
+        self.notifications_view.setHtml(
+            "".join(cards)
+            or "<h2>Aucune notification</h2><p>Aucune activité Git distante "
+            "n’a encore été détectée.</p>"
+        )
+        activity_count = len(self.git_activities)
+        total_count = activity_count + len(self.updates)
+        self.notifications_count.setText(f"{total_count} notification(s)")
+        if hasattr(self, "notifications_button"):
+            self.notifications_button.setText(f"Notifications ({total_count})")
+
+    def _poll_git_activity(self) -> None:
+        if self.git_activity_task is not None:
+            return
+        task = GitActivityTask(previous=self.git_activity_snapshot)
+        ACTIVE_GIT_ACTIVITY_TASKS.append(task)
+        self.git_activity_task = task
+        task.signals.activity.connect(self._git_activity_received)
+        task.signals.failed.connect(self._git_activity_failed)
+        self.pool.start(task)
+
+    def _git_activity_received(
+        self,
+        snapshot: dict[str, str],
+        activities: list[dict[str, str]],
+    ) -> None:
+        if self.git_activity_task in ACTIVE_GIT_ACTIVITY_TASKS:
+            ACTIVE_GIT_ACTIVITY_TASKS.remove(self.git_activity_task)
+        self.git_activity_task = None
+        self.git_activity_snapshot = snapshot
+        if activities:
+            self.git_activities = (activities + self.git_activities)[:100]
+            self._render_notifications()
+            self._set_git_notification(
+                f"{len(activities)} nouvelle(s) activité(s) Git détectée(s).",
+            )
+        self._refresh_git_status()
+
+    def _git_activity_failed(self, error: str) -> None:
+        if self.git_activity_task in ACTIVE_GIT_ACTIVITY_TASKS:
+            ACTIVE_GIT_ACTIVITY_TASKS.remove(self.git_activity_task)
+        self.git_activity_task = None
+        self.git_activity_snapshot = {}
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self.git_activity_timer.stop()
+        for task in ACTIVE_GIT_ACTIVITY_TASKS:
+            task.cancelled = True
+        super().closeEvent(event)
 
     def _build_git_page(self) -> QWidget:
         page, layout = self._page()
@@ -1206,6 +1455,12 @@ class MainWindow(QMainWindow):
             #primary_button { background: #327653; color: #ffffff; border: 1px solid #327653; }
             #primary_button:hover { background: #286746; }
             #roadmap { background: #ffffff; color: #293831; border: 1px solid #e2e6de; border-radius: 5px; padding: 16px; }
+            #updates { background: #ffffff; color: #293831; border: 1px solid #e2e6de; border-radius: 5px; padding: 16px; }
+            #updates h2 { color: #327653; margin: 0 0 6px 0; }
+            #updates p { line-height: 1.45; }
+            #updates .update { background: #f7faf7; border-left: 4px solid #327653; padding: 14px 18px; margin-bottom: 14px; }
+            #updates .meta { color: #6f7e75; font-size: 10pt; }
+            #updates .tools { color: #40584a; }
             #status_line { background: #eaf2ed; color: #365344; padding: 9px 12px; border-radius: 4px; }
             #notice { color: #745d2f; background: #fff5df; border-left: 3px solid #d3a64e; padding: 10px 12px; }
             #notification { color: #245c42; background: #eaf2ed; border-left: 3px solid #327653; padding: 10px 12px; }

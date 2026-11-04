@@ -27,9 +27,10 @@ class GitAndEditorTests(unittest.TestCase):
         window = MainWindow()
         labels = [button.text() for button in window.nav_buttons]
 
-        self.assertEqual(labels, ["Bibliothèque", "Gestion Git", "Parcours Git"])
+        self.assertEqual(labels, ["Bibliothèque", "Notifications", "Gestion Git", "Parcours Git"])
         self.assertTrue(hasattr(window, "git_files"))
         self.assertTrue(hasattr(window, "fetch_branches_button"))
+        self.assertEqual(window.notifications_button.text(), "Notifications (1)")
         window.close()
 
     def test_branch_switch_error_guides_user_to_publish_changes(self) -> None:
@@ -174,7 +175,7 @@ class GitAndEditorTests(unittest.TestCase):
 
     def test_git_roadmap_renders_markdown_headings_and_code_blocks(self) -> None:
         window = MainWindow()
-        guide = window.pages.widget(2).findChild(QTextBrowser, "roadmap")
+        guide = window.pages.widget(3).findChild(QTextBrowser, "roadmap")
 
         self.assertIsInstance(guide, QTextBrowser)
         self.assertIn("git clone", guide.toPlainText())

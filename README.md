@@ -6,6 +6,7 @@ Application de bureau pour parcourir, comprendre et modifier les scripts Python 
 - [Utiliser la bibliothèque](#utiliser-la-bibliothèque)
 - [Modifier un fichier et le publier avec Git](#modifier-un-fichier-et-le-publier-avec-git)
 - [Workflow anti-conflit](#workflow-anti-conflit)
+- [Publier une notification](#publier-une-notification)
 - [Configurer un jeton GitHub](#configurer-un-jeton-github)
 - [Résoudre les problèmes Git courants](#résoudre-les-problèmes-git-courants)
 - [Dépendances et tests](#dépendances-et-tests)
@@ -236,6 +237,24 @@ La publication applique automatiquement ce contrôle, sans commande à saisir :
 4. le push n’utilise jamais `--force` : une course avec un autre utilisateur est donc refusée plutôt qu’écrasée.
 
 La page **Gestion Git** affiche une notification d’état après chaque actualisation ou récupération. Les fichiers sont différenciés par couleur : **bleu** pour un ajout, **vert** pour une modification et **rouge** pour une suppression. Cette légende permet de relire rapidement l’impact d’une mise à jour avant de cocher les fichiers.
+
+### Publier une notification
+
+Les évolutions éditoriales destinées aux utilisateurs peuvent être publiées dans [updates.json](./updates.json). Ajoutez une entrée avec les champs `date` (`AAAA-MM-JJ`), `title`, `summary`, `level` et, si nécessaire, `tools`.
+
+```json
+{
+  "date": "2026-11-05",
+  "level": "Information",
+  "title": "Nouveau traitement disponible",
+  "summary": "Le traitement ... est maintenant disponible.",
+  "tools": "Nom de l’outil"
+}
+```
+
+Les activités Git sont surveillées automatiquement toutes les 30 secondes. L’application récupère les références de `origin` en arrière-plan et affiche sans redémarrage les nouveaux commits et les branches créées ou supprimées, avec la branche, le sujet, l’auteur, la date et l’identifiant abrégé du commit. Le premier contrôle établit seulement l’état de référence afin de ne pas notifier rétroactivement tout l’historique.
+
+Les notifications éditoriales sont versionnées avec le dépôt. La surveillance distante nécessite une authentification Git déjà configurée (SSH, gestionnaire d’identifiants ou jeton précédemment enregistré) ; si le dépôt n’est pas accessible, l’application conserve l’interface disponible et réessaie au contrôle suivant.
 
 ### Changer de branche sans fermer l’application
 

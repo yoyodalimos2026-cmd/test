@@ -1,0 +1,9 @@
+[
+  {
+    "date": "2026-11-04",
+    "level": "Mise à jour",
+    "title": "Gestion Git sécurisée et notifications",
+    "summary": "La publication vérifie automatiquement la synchronisation avec le dépôt distant. Les fichiers touchés sont identifiés par couleur et les évolutions de l’équipe sont maintenant visibles dans la rubrique Notifications.",
+    "tools": "Gestion Git, Bibliothèque"
+  }
+]

@@ -18,6 +18,7 @@ L’application aide une équipe à explorer des modules VBA et des scripts Pyth
 - Permettre l’authentification HTTPS par identifiant et jeton à usage ponctuel, ou réutiliser la configuration SSH/Git existante.
 - Vérifier automatiquement la fraîcheur des branches avant tout commit ou push et notifier l’utilisateur des évolutions.
 - Différencier visuellement les ajouts, modifications et suppressions dans la liste Git.
+- Surveiller automatiquement l’activité distante de `origin` et afficher les nouveaux commits et branches sans redémarrage.
 
 ## 3. Technologies et dépendances
 
@@ -58,6 +59,8 @@ Les commandes principales sont :
 6. pousser la branche choisie vers `origin`.
 
 La page affiche une notification persistante pour les synchronisations, les mises à jour détectées et les erreurs. Les fichiers ajoutés, modifiés et supprimés sont respectivement affichés en bleu, vert et rouge.
+
+`GitActivityTask` récupère les références distantes toutes les 30 secondes dans un worker Qt. Il conserve un instantané des branches `origin/*`, ignore l’état initial, puis signale les nouveaux commits et les créations/suppressions de branches. La rubrique **Notifications** est mise à jour par les signaux Qt ; aucun redémarrage n’est nécessaire.
 
 Les erreurs de Git sont affichées dans la fenêtre. Une erreur après le commit ne supprime pas le commit local.
 

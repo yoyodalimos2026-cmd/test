@@ -94,6 +94,12 @@ Avant chaque publication, l’application récupère automatiquement les référ
 
 La liste des fichiers utilise un code couleur : bleu = fichier ajouté, vert = fichier modifié, rouge = fichier supprimé. La notification confirme également la fin d’une synchronisation ou signale l’erreur à traiter.
 
+## 6. Notifications automatiques d’activité Git
+
+L’application surveille `origin` automatiquement toutes les 30 secondes, sans redémarrage. Elle détecte les nouveaux commits ainsi que les branches distantes créées ou supprimées et affiche le détail dans **Notifications** : branche, sujet du commit, auteur, date et identifiant abrégé.
+
+Le premier contrôle établit l’état initial sans générer de fausses alertes sur l’historique existant. Les contrôles suivants affichent uniquement les nouvelles activités. L’accès au dépôt distant doit être déjà configuré dans Git ; en cas d’échec réseau ou d’authentification, l’application réessaie automatiquement.
+
 L’application crée un commit local avec le nom et l’adresse Git configurés à l’étape 2, puis pousse les fichiers cochés sur la branche sélectionnée. Les autres modifications restent non publiées. Il n’est pas nécessaire d’ajouter manuellement les fichiers dans Git avant cette opération.
 
 ## Changer de branche dans l’application
