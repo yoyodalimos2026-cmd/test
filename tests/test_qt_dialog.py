@@ -34,6 +34,22 @@ class GitAndEditorTests(unittest.TestCase):
         self.assertEqual(window.notifications_button.text(), "Notifications (0)")
         window.close()
 
+    def test_connected_repository_button_is_green_and_disabled(self) -> None:
+        window = MainWindow()
+
+        window._set_git_repository_connected(True)
+
+        self.assertEqual(window.git_connect_button.text(), "Dépôt déjà connecté")
+        self.assertFalse(window.git_connect_button.isEnabled())
+        self.assertEqual(window.git_connect_button.property("connected"), True)
+
+        window._set_git_repository_connected(False)
+
+        self.assertEqual(window.git_connect_button.text(), "Connecter le dépôt")
+        self.assertTrue(window.git_connect_button.isEnabled())
+        self.assertEqual(window.git_connect_button.property("connected"), False)
+        window.close()
+
     def test_branch_switch_error_guides_user_to_publish_changes(self) -> None:
         window = MainWindow()
         window.git_switch_task = object()

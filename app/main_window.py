@@ -601,6 +601,24 @@ class GitConnectTask(QRunnable):
             self.token = ""
 
 
+class GitConnectionCheckTask(QRunnable):
+    def __init__(self, remote: str, repo_path: Path = ROOT):
+        super().__init__()
+        self.remote = remote
+        self.repo_path = repo_path
+        self.signals = GitTaskSignals()
+
+    def run(self) -> None:
+        try:
+            GitPushTask._git(
+                "ls-remote", self.remote, "HEAD",
+                cwd=self.repo_path,
+            )
+            self.signals.finished.emit()
+        except Exception as error:
+            self.signals.failed.emit(str(error))
+
+
 class GitActivityTask(QRunnable):
     def __init__(self, repo_path: Path = ROOT, previous: dict[str, str] | None = None):
         super().__init__()
@@ -720,6 +738,8 @@ class MainWindow(QMainWindow):
         self.git_fetch_task: GitFetchTask | None = None
         self.git_pull_task: GitPullTask | None = None
         self.git_connect_task: GitConnectTask | None = None
+        self.git_connection_check_task: GitConnectionCheckTask | None = None
+        self.git_repository_connected = False
         self.current_git_branch = ""
         self.descriptions = self._read_descriptions()
         self.git_activity_snapshot: dict[str, str] = {}
@@ -1122,8 +1142,10 @@ class MainWindow(QMainWindow):
         self.git_token.setEchoMode(QLineEdit.EchoMode.Password)
         credentials_row.addWidget(self.git_token, 1)
         self.git_connect_button = QPushButton("Connecter le dépôt")
+        self.git_connect_button.setObjectName("git_connect_button")
         self.git_connect_button.clicked.connect(self._connect_git_repository)
         credentials_row.addWidget(self.git_connect_button)
+        self.git_remote.textChanged.connect(self._git_remote_changed)
         layout.addLayout(credentials_row)
 
         self.git_status = _label("État Git du dépôt courant", "status_line")
@@ -1236,7 +1258,7 @@ class MainWindow(QMainWindow):
 
     def _git_connect_finished(self) -> None:
         self.git_connect_task = None
-        self.git_connect_button.setEnabled(True)
+        self._set_git_repository_connected(True)
         self.git_push_button.setEnabled(True)
         self.fetch_branches_button.setEnabled(True)
         self._set_git_notification(
@@ -1256,7 +1278,7 @@ class MainWindow(QMainWindow):
 
     def _git_connect_failed(self, error: str) -> None:
         self.git_connect_task = None
-        self.git_connect_button.setEnabled(True)
+        self._set_git_repository_connected(False)
         self.git_push_button.setEnabled(True)
         self.fetch_branches_button.setEnabled(True)
         self._set_git_notification(f"Connexion impossible : {error}", warning=True)
@@ -1302,6 +1324,7 @@ class MainWindow(QMainWindow):
             return
 
         self.current_git_branch = branch
+        self._check_git_repository_connection()
         self._refresh_branch_targets(local_branches, remote_branches)
         self.git_select_all.blockSignals(True)
         self.git_select_all.setCheckState(Qt.CheckState.Unchecked)
@@ -1342,6 +1365,52 @@ class MainWindow(QMainWindow):
             if changed_count == 0
             else f"{changed_count} modification(s) détectée(s). Sélectionnez uniquement les fichiers à publier."
         )
+
+    def _set_git_repository_connected(self, connected: bool) -> None:
+        self.git_repository_connected = connected
+        if connected:
+            self.git_connect_button.setText("Dépôt déjà connecté")
+            self.git_connect_button.setEnabled(False)
+            self.git_connect_button.setProperty("connected", True)
+        else:
+            self.git_connect_button.setText("Connecter le dépôt")
+            self.git_connect_button.setEnabled(self.git_connect_task is None)
+            self.git_connect_button.setProperty("connected", False)
+        self.git_connect_button.style().unpolish(self.git_connect_button)
+        self.git_connect_button.style().polish(self.git_connect_button)
+
+    def _git_remote_changed(self, _remote: str) -> None:
+        if self.git_connection_check_task is None:
+            self._set_git_repository_connected(False)
+
+    def _check_git_repository_connection(self) -> None:
+        remote = self.git_remote.text().strip()
+        if (
+            not remote
+            or self.git_repository_connected
+            or self.git_connection_check_task is not None
+            or self.git_connect_task is not None
+        ):
+            return
+        self.git_connect_button.setEnabled(False)
+        task = GitConnectionCheckTask(remote)
+        self.git_connection_check_task = task
+        task.signals.finished.connect(self._git_connection_check_finished)
+        task.signals.failed.connect(self._git_connection_check_failed)
+        self.pool.start(task)
+
+    def _git_connection_check_finished(self) -> None:
+        task = self.git_connection_check_task
+        self.git_connection_check_task = None
+        if task is None or self.git_remote.text().strip() != task.remote:
+            self._check_git_repository_connection()
+            return
+        self._set_git_repository_connected(True)
+        self._set_git_notification("Connexion au dépôt vérifiée.")
+
+    def _git_connection_check_failed(self, _error: str) -> None:
+        self.git_connection_check_task = None
+        self._set_git_repository_connected(False)
 
     def _toggle_all_git_files(self, state: int) -> None:
         target_state = (
@@ -1705,6 +1774,7 @@ class MainWindow(QMainWindow):
             QPushButton:disabled { color: #899187; background: #edf0ed; }
             QPushButton#notification_button[alert="true"] { background: #c62828; color: #ffffff; border-color: #a51f1f; }
             QPushButton#notification_button[alert="true"]:hover { background: #a51f1f; }
+            QPushButton#git_connect_button[connected="true"] { background: #2f8f57; color: #ffffff; border-color: #2f8f57; }
             #primary_button { background: #327653; color: #ffffff; border: 1px solid #327653; }
             #primary_button:hover { background: #286746; }
             #roadmap { background: #ffffff; color: #293831; border: 1px solid #e2e6de; border-radius: 5px; padding: 16px; }

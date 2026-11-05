@@ -255,6 +255,8 @@ Pour vérifier la préparation avant de rendre le dépôt privé, utilisez **Ré
 
 Pour enregistrer l’accès de façon explicite, utilisez **Connecter le dépôt**. Saisissez l’URL HTTPS, votre nom d’utilisateur et un jeton GitHub limité au dépôt. L’application teste d’abord le jeton, puis le transmet à `git credential approve`. Si Git Credential Manager, Keychain, Secret Service ou KWallet est disponible, il est utilisé ; sinon Git configure automatiquement un cache mémoire temporaire, jamais un fichier texte. Le jeton est effacé du formulaire et n’est jamais écrit dans le code ou l’URL. Le listener et les futures synchronisations réutilisent ensuite cet accès.
 
+Lorsque l’accès enregistré est vérifié au démarrage ou après une actualisation, le bouton devient vert et affiche **Dépôt déjà connecté**. Il est alors désactivé pour éviter de demander inutilement une nouvelle connexion. Il redevient disponible si l’URL du dépôt change ou si l’accès enregistré n’est plus valide.
+
 ### Changer de branche sans fermer l’application
 
 Dans **Gestion Git**, choisissez une branche existante dans la liste puis cliquez sur **Basculer vers cette branche**. L’application met à jour la branche active et recharge la bibliothèque sans redémarrage. Les modifications non publiées (y compris les fichiers non suivis) bloquent le basculement pour éviter toute perte : publiez-les ou traitez-les avant de changer.
