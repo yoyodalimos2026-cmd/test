@@ -1006,7 +1006,7 @@ class MainWindow(QMainWindow):
         if branch != self.current_git_branch:
             return
         if self.git_pull_task is not None or self.git_task is not None:
-            return
+            return 
         self.git_status.setText(f"Mise à jour de « {branch} »…")
         self._set_git_notification(
             f"Synchronisation de la branche « {branch} » en cours…"
