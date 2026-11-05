@@ -297,27 +297,8 @@ Pour les étapes détaillées destinées aux nouveaux utilisateurs, y compris la
 
 ## Dépendances et tests
 
-`requirements.txt` contient les dépendances Python de l’application, des outils métier existants et des tests. **Git est un programme système, pas une bibliothèque Python** : il doit être installé séparément et accessible depuis `PATH`.
+`requirements.txt` contient les dépendances Python de l’application, des outils métier existants. **Git est un programme système, pas une bibliothèque Python** : il doit être installé séparément et accessible depuis `PATH`.
 
-Exécuter la suite de tests depuis la racine du projet :
-
-**Windows (PowerShell) :**
-
-```powershell
-.\.venv\Scripts\python.exe -m unittest discover -s tests
-```
-
-**Linux :**
-
-```bash
-.venv/bin/python -m unittest discover -s tests
-```
-
-Sur Linux sans écran graphique :
-
-```bash
-QT_QPA_PLATFORM=offscreen .venv/bin/python -m unittest discover -s tests
-```
 
 ## Conception et sécurité
 
