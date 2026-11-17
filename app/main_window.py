@@ -53,7 +53,7 @@ from app.catalog import CatalogItem, related_items, scan_catalog
 
 ROOT = Path(__file__).resolve().parents[1]
 DESCRIPTIONS_FILE = ROOT / "module_descriptions.json"
-GIT_ACTIVITY_INTERVAL_MS = 30_000
+GIT_ACTIVITY_INTERVAL_MS = 10_000
 
 
 def _show_message(
