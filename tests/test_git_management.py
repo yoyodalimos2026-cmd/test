@@ -5,7 +5,13 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from app.main_window import GitBranchSwitchTask, GitFetchTask, GitPushTask, _askpass_environment
+from app.main_window import (
+    GitBranchSwitchTask,
+    GitFetchTask,
+    GitPushTask,
+    _askpass_environment,
+    _git_branches,
+)
 
 
 def git(repository: Path, *args: str) -> str:
@@ -202,6 +208,29 @@ class GitPushTaskTests(unittest.TestCase):
             "origin/feature/from-server",
             git(self.repository, "branch", "-r", "--format=%(refname:short)"),
         )
+
+    def test_fetch_prunes_deleted_remote_branch_from_selectable_branches(self) -> None:
+        git(self.repository, "remote", "add", "origin", str(self.remote))
+        git(self.repository, "switch", "-c", "feature/deleted")
+        git(self.repository, "push", "-u", "origin", "feature/deleted")
+        git(self.repository, "switch", "main")
+        git(
+            self.root,
+            "--git-dir",
+            str(self.remote),
+            "update-ref",
+            "-d",
+            "refs/heads/feature/deleted",
+        )
+
+        _, finished, failed = self._fetch()
+
+        self.assertEqual(finished, ["done"])
+        self.assertEqual(failed, [])
+        local_branches, remote_branches = _git_branches(self.repository)
+        self.assertNotIn("feature/deleted", local_branches)
+        self.assertNotIn("feature/deleted", remote_branches)
+        self.assertIn("feature/deleted", git(self.repository, "branch").split())
 
     def test_refuses_to_switch_with_uncommitted_changes(self) -> None:
         git(self.repository, "switch", "-c", "feature/blocked")

@@ -482,6 +482,29 @@ class GitFetchTask(QRunnable):
             self.token = ""
 
 
+def _git_branches(repo_path: Path = ROOT) -> tuple[set[str], set[str]]:
+    local_branches: set[str] = set()
+    local_refs = GitPushTask._git(
+        "for-each-ref",
+        "--format=%(refname:short)|%(upstream:track)",
+        "refs/heads",
+        cwd=repo_path,
+    )
+    for line in local_refs.splitlines():
+        branch, _, upstream_status = line.partition("|")
+        if branch and upstream_status.strip() != "[gone]":
+            local_branches.add(branch)
+
+    remote_branches = {
+        name.removeprefix("origin/")
+        for name in GitPushTask._git(
+            "branch", "-r", "--format=%(refname:short)", cwd=repo_path
+        ).splitlines()
+        if name.startswith("origin/") and name != "origin/HEAD"
+    }
+    return local_branches, remote_branches
+
+
 class GitPullTask(QRunnable):
     def __init__(self, branch: str, repo_path: Path = ROOT):
         super().__init__()
@@ -1310,14 +1333,7 @@ class MainWindow(QMainWindow):
         try:
             entries = self._git("status", "--porcelain=v1", "-z", "--untracked-files=all").split("\0")
             branch = self._git("branch", "--show-current").strip()
-            local_branches = set(self._git("branch", "--format=%(refname:short)").splitlines())
-            remote_branches = {
-                name.removeprefix("origin/")
-                for name in self._git(
-                    "branch", "-r", "--format=%(refname:short)"
-                ).splitlines()
-                if name.startswith("origin/") and name != "origin/HEAD"
-            }
+            local_branches, remote_branches = _git_branches()
         except RuntimeError as error:
             self.git_status.setText(f"Impossible de lire l’état Git : {error}")
             _show_message(self, "État Git indisponible", str(error), QMessageBox.Icon.Critical)
