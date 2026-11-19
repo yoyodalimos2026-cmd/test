@@ -2,6 +2,7 @@ Attribute VB_Name = "Module1"
 Public Choix_CBO As String
 Public Fichier_trame As String
 
+
 Sub New_COMP()
 '
 'Macro enregistrer le 07/09/2016 par Mr Yassine HASSEN
