@@ -1,7 +1,6 @@
 Attribute VB_Name = "Module15"
 Sub Indicateur_Iper3()
 
-
 '=======================Verifie si la colonne "Nb de Jour" existe==============================
 For x = 1 To 30
 
